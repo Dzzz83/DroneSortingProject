@@ -1,8 +1,55 @@
 # Drone Sorting Project
 
-Unity + ROS 1 simulation for an autonomous drone that transports packages between sorting zones while avoiding obstacles.
+Unity + ROS 1 simulation for an autonomous drone that transports lightweight packages between sorting zones while avoiding obstacles.
 
-ROS acts as the **control system**, while Unity provides the **simulation environment, sensors, and drone movement**.
+ROS acts as the main control system. Unity provides the simulated warehouse environment, drone movement, position feedback, and obstacle sensor data.
+
+## Table of Contents
+
+- [Drone Sorting Project](#drone-sorting-project)
+  - [Table of Contents](#table-of-contents)
+  - [Project Overview](#project-overview)
+  - [Project Structure](#project-structure)
+  - [Main Components](#main-components)
+    - [ROS Components](#ros-components)
+      - [Mission Manager](#mission-manager)
+      - [Motion Controller](#motion-controller)
+      - [Obstacle Avoidance Planner](#obstacle-avoidance-planner)
+      - [ROS Launch File](#ros-launch-file)
+      - [Helper Scripts](#helper-scripts)
+    - [Unity Components](#unity-components)
+      - [DroneRosSubscriber.cs](#dronerossubscribercs)
+      - [DroneStatePublisher.cs](#dronestatepublishercs)
+      - [DroneObstacleSensorPublisher.cs](#droneobstaclesensorpublishercs)
+      - [ObstacleCourseCamera.cs](#obstaclecoursecameracs)
+      - [Unity Editor Tools](#unity-editor-tools)
+  - [Current Data Flow](#current-data-flow)
+  - [Workflow](#workflow)
+  - [Installation](#installation)
+    - [Requirements](#requirements)
+    - [Linux](#linux)
+    - [Windows](#windows)
+  - [Current Status](#current-status)
+
+## Project Overview
+
+The project separates simulation from decision-making.
+
+**Unity** is responsible for:
+
+- Simulating the warehouse and obstacles
+- Moving the drone
+- Measuring obstacle distances
+- Reporting the drone's current position
+
+**ROS 1** is responsible for:
+
+- Managing mission targets
+- Processing position and sensor data
+- Deciding how the drone should avoid obstacles
+- Calculating the next movement command
+
+Communication between ROS and Unity is handled through the Unity ROS-TCP-Connector and ROS-TCP-Endpoint.
 
 ## Project Structure
 
@@ -39,40 +86,41 @@ DroneSortingProject/
 
 ## Main Components
 
-### ROS
+### ROS Components
 
-**Mission Manager**
+#### Mission Manager
 
-Chooses the current destination and publishes:
+The Mission Manager controls the high-level destination of the drone. It selects the current target position for the mission and publishes that target to:
 
 ```text
 /drone/target_position
 ```
 
-**Motion Controller**
+The Motion Controller uses this position as the destination the drone should move toward.
 
-Receives the target, current drone position, and obstacle sensor data.
+#### Motion Controller
 
-It decides the drone's next position and publishes:
+The Motion Controller is the main ROS control node.
+
+It receives:
+
+- The target position from the Mission Manager
+- The current drone position from Unity
+- Obstacle distance readings from Unity
+
+It combines this information with the obstacle avoidance planner, calculates the next safe movement position, and publishes it to:
 
 ```text
 /drone/command_position
 ```
 
-**Obstacle Avoidance Planner**
+#### Obstacle Avoidance Planner
 
-Processes obstacle distances and decides whether the drone should:
+The Obstacle Avoidance Planner decides how the drone should react when an obstacle is detected.
 
-```text
-FORWARD
-UP
-DOWN
-LEFT
-RIGHT
-STOP
-```
+It evaluates the front, upper, lower, side, up, and down sensor readings and determines whether the drone should continue forward, climb, descend, or move sideways.
 
-The planner uses states such as:
+Main planner states include:
 
 ```text
 NORMAL
@@ -83,23 +131,61 @@ SIDESTEP_LEFT
 SIDESTEP_RIGHT
 ```
 
-### Unity
+Possible movement actions include:
 
-**DroneRosSubscriber.cs**
+```text
+FORWARD
+FORWARD_LEVEL
+UP
+DOWN
+LEFT
+RIGHT
+STOP
+```
 
-Receives `/drone/command_position` from ROS and moves the drone.
+#### ROS Launch File
 
-**DroneStatePublisher.cs**
+`drone_demo.launch` starts the main ROS nodes required for the current simulation, allowing the ROS side of the project to be launched with one command.
 
-Sends the drone's current position to ROS:
+#### Helper Scripts
+
+Scripts inside `ROS1/scripts/` simplify common development tasks such as:
+
+- Building the ROS workspace
+- Starting the complete demo
+- Stopping the running ROS processes
+- Monitoring obstacle sensor data
+- Recompiling Unity-related components
+
+### Unity Components
+
+#### DroneRosSubscriber.cs
+
+Receives movement commands from:
+
+```text
+/drone/command_position
+```
+
+It moves the Unity drone toward the position calculated by ROS.
+
+Unity therefore performs the simulated movement, but the movement decision itself comes from ROS.
+
+#### DroneStatePublisher.cs
+
+Continuously reports the drone's current Unity position to ROS through:
 
 ```text
 /drone/current_position
 ```
 
-**DroneObstacleSensorPublisher.cs**
+This gives the Motion Controller feedback about where the drone actually is after each movement.
 
-Uses Unity sensors to detect nearby obstacles and publishes:
+#### DroneObstacleSensorPublisher.cs
+
+Simulates the drone's obstacle sensors using Unity physics.
+
+It measures obstacle distances in several directions and publishes them through:
 
 ```text
 /drone/obstacle_distances
@@ -119,28 +205,34 @@ Sensor order:
 ]
 ```
 
-`-1.0` means no obstacle was detected within the sensor range.
+A value of `-1.0` means that no obstacle was detected within the configured sensor range.
 
-**ObstacleCourseCamera.cs**
+#### ObstacleCourseCamera.cs
 
-Controls the camera used to view the obstacle course.
+Controls the camera used to observe the drone and obstacle course during the simulation.
 
-**Unity Editor Tools**
+#### Unity Editor Tools
 
-Scripts inside `Assets/Editor/` automatically create or configure parts of the simulation such as the warehouse, obstacle sensors, and state publisher.
+Scripts inside `Unity/Assets/Editor/` help automatically configure parts of the simulation, including:
+
+- Warehouse and obstacle course creation
+- Drone state publisher setup
+- Obstacle sensor setup
+
+This reduces the amount of manual configuration required inside the Unity Editor.
 
 ## Current Data Flow
 
 ```text
 Mission Manager
       |
-      | target_position
+      | /drone/target_position
       v
 Motion Controller
       ^
       |
-      | current_position
-      | obstacle_distances
+      | /drone/current_position
+      | /drone/obstacle_distances
       |
     Unity
       |
@@ -150,35 +242,36 @@ Obstacle Avoidance Planner
       v
 Motion Controller
       |
-      | command_position
+      | /drone/command_position
       v
 Unity Drone
       |
-      └──────── feedback to ROS
+      └──────── updated position and sensor data ────────> ROS
 ```
 
 Main ROS topics:
 
 | Topic | Purpose |
 |---|---|
-| `/drone/target_position` | Mission destination |
-| `/drone/current_position` | Current drone position |
-| `/drone/obstacle_distances` | Unity sensor readings |
-| `/drone/command_position` | Movement command from ROS |
-| `/drone/travel_heading` | Current travel direction |
+| `/drone/target_position` | Destination selected by the Mission Manager |
+| `/drone/current_position` | Current drone position reported by Unity |
+| `/drone/obstacle_distances` | Obstacle sensor readings reported by Unity |
+| `/drone/command_position` | Next safe movement position calculated by ROS |
+| `/drone/travel_heading` | Current direction of travel |
 
 ## Workflow
 
-1. Mission Manager selects a target position.
+1. The Mission Manager selects the current destination.
 2. Unity reports the drone's current position.
 3. Unity measures nearby obstacles.
-4. ROS receives the position and sensor data.
-5. The obstacle avoidance planner decides whether the path is clear.
-6. The motion controller calculates the next drone position.
-7. ROS publishes `/drone/command_position`.
-8. Unity moves the drone.
-9. Unity sends updated position and sensor data back to ROS.
-10. The process repeats until the target is reached.
+4. ROS receives the position and obstacle data.
+5. The Motion Controller checks whether the direct path is safe.
+6. The Obstacle Avoidance Planner selects an appropriate movement action if an obstacle is detected.
+7. The Motion Controller calculates the next command position.
+8. ROS publishes `/drone/command_position`.
+9. Unity moves the drone toward that position.
+10. Unity sends updated position and sensor data back to ROS.
+11. The control loop repeats until the target is reached.
 
 ## Installation
 
@@ -189,6 +282,7 @@ Main ROS topics:
 - Ubuntu 20.04 ROS environment
 - Git
 - Catkin
+- Unity ROS-TCP-Connector
 - ROS-TCP-Endpoint
 
 ROS-TCP-Endpoint:
@@ -197,11 +291,9 @@ ROS-TCP-Endpoint:
 https://github.com/Unity-Technologies/ROS-TCP-Endpoint
 ```
 
----
+### Linux
 
-## Linux
-
-The project can run on Ubuntu 20.04 directly or from an Ubuntu 20.04 container such as Distrobox.
+ROS Noetic can run directly on Ubuntu 20.04 or inside an Ubuntu 20.04 container such as Distrobox.
 
 Clone the project:
 
@@ -230,7 +322,7 @@ cd ~/drone_sorting_ros1_ws/src
 git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
 ```
 
-Build:
+Build the workspace:
 
 ```bash
 cd ~/drone_sorting_ros1_ws
@@ -240,7 +332,7 @@ catkin_make
 source devel/setup.bash
 ```
 
-Open the `Unity` folder using Unity Hub.
+Open the repository's `Unity` folder in Unity Hub.
 
 Configure:
 
@@ -260,13 +352,9 @@ roslaunch drone_sorting drone_demo.launch
 
 Then press **Play** in Unity.
 
----
+### Windows
 
-## Windows
-
-ROS 1 Noetic should run inside **WSL2 Ubuntu 20.04**, while Unity runs normally on Windows.
-
-Install WSL2 and Ubuntu 20.04, then install ROS Noetic inside Ubuntu.
+Unity runs normally on Windows, while ROS 1 Noetic should run inside **WSL2 with Ubuntu 20.04**.
 
 Inside WSL:
 
@@ -275,7 +363,6 @@ git clone https://github.com/Dzzz83/DroneSortingProject.git
 cd DroneSortingProject
 
 mkdir -p ~/drone_sorting_ros1_ws/src
-
 cp -r ROS1/src/drone_sorting ~/drone_sorting_ros1_ws/src/
 ```
 
@@ -287,7 +374,7 @@ cd ~/drone_sorting_ros1_ws/src
 git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
 ```
 
-Build:
+Build the ROS workspace:
 
 ```bash
 cd ~/drone_sorting_ros1_ws
@@ -297,7 +384,7 @@ catkin_make
 source devel/setup.bash
 ```
 
-Open the repository's `Unity` folder using Unity Hub on Windows.
+Open the repository's `Unity` folder with Unity Hub on Windows.
 
 Start ROS inside WSL:
 
@@ -305,7 +392,7 @@ Start ROS inside WSL:
 roslaunch drone_sorting drone_demo.launch
 ```
 
-In Unity, configure the ROS connection:
+Configure Unity:
 
 ```text
 Protocol: ROS1
@@ -320,7 +407,7 @@ Try:
 
 first.
 
-If Unity cannot connect to ROS through WSL, obtain the WSL IP:
+If Unity cannot connect to ROS through WSL, get the WSL IP:
 
 ```bash
 hostname -I
@@ -332,20 +419,22 @@ Then press **Play**.
 
 ## Current Status
 
-Working:
+Currently working:
 
 - ROS ↔ Unity communication
-- Autonomous target movement
+- Target-based autonomous movement
 - Position feedback
 - Obstacle sensing
 - ROS-based motion control
 - Static obstacle avoidance
-- Automatic climb/descend avoidance
+- Automatic climbing and descending
+- Side-step avoidance support
 - Repeated obstacle-course traversal
 
-Planned:
+Planned work:
 
 - Improved sensing
-- Package attachment and delivery
+- Package attachment
+- Package delivery
 - Dynamic obstacle avoidance
-- Final system testing
+- Full-system testing
