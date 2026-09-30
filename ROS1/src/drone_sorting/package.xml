@@ -1,20 +1,21 @@
-
 <?xml version="1.0"?>
 <package format="2">
   <name>drone_sorting</name>
-  <version>0.1.0</version>
+  <version>0.0.0</version>
+
   <description>
-    ROS 1 drone sorting simulation with Unity integration.
+    ROS1 control system for the warehouse drone sorting simulation.
   </description>
 
-  <maintainer email="your-email@example.com">Your Name</maintainer>
-
-  <license>MIT</license>
+  <maintainer email="dzzz83@todo.todo">dzzz83</maintainer>
+  <license>TODO</license>
 
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>rospy</depend>
   <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
 
-  <export/>
+  <export>
+  </export>
 </package>

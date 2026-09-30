@@ -1,93 +1,194 @@
-
 # Drone Sorting Simulation
 
-A Unity and ROS 1 project demonstrating automated drone movement between two sorting zones.
+A Unity and ROS 1 simulation for automated drone-based parcel sorting in a logistics environment.
+
+ROS acts as the main control system. Unity provides the simulated environment, drone movement, position feedback, and obstacle sensor data.
+
+## Current Features
+
+- ROS 1 ↔ Unity communication through ROS-TCP-Endpoint
+- Automated movement between sorting zones
+- Drone position feedback from Unity to ROS
+- Simulated obstacle-distance sensors
+- ROS-based motion control
+- ROS-based static obstacle avoidance
+- Vertical avoidance by climbing or descending
+- Side-step avoidance support
+- Automated demo startup scripts
+
+## System Architecture
+
+```text
+Mission Manager
+      |
+      | /drone/target_position
+      v
+Motion Controller
+      |
+      +---- Obstacle Avoidance Planner
+      |             ^
+      |             |
+      |     /drone/obstacle_distances
+      |             |
+      |           Unity
+      |
+      | /drone/command_position
+      v
+Unity Drone
+      |
+      +---- /drone/current_position ----> ROS
+```
+
+ROS decides where the drone should move.
+
+Unity simulates the movement and sends the drone's current position and obstacle sensor readings back to ROS.
+
+## ROS Topics
+
+| Topic | Message Type | Purpose |
+|---|---|---|
+| `/drone/target_position` | `geometry_msgs/Point` | Current mission destination |
+| `/drone/current_position` | `geometry_msgs/Point` | Drone position reported by Unity |
+| `/drone/obstacle_distances` | `std_msgs/Float32MultiArray` | Obstacle sensor readings |
+| `/drone/command_position` | `geometry_msgs/Point` | Movement command calculated by ROS |
+| `/drone/travel_heading` | `geometry_msgs/Vector3` | Current travel direction |
+
+Obstacle sensor order:
+
+```text
+[
+  front,
+  upper_front,
+  lower_front,
+  left,
+  right,
+  up,
+  down
+]
+```
+
+A value of `-1.0` means that no obstacle was detected within the sensor range.
+
+## Project Structure
+
+```text
+DroneSortingProject/
+├── ROS1/
+│   ├── scripts/
+│   │   ├── build_ros.sh
+│   │   ├── recompile_unity.sh
+│   │   ├── start_demo.sh
+│   │   ├── stop_demo.sh
+│   │   └── watch_obstacles.sh
+│   │
+│   └── src/
+│       └── drone_sorting/
+│           ├── launch/
+│           │   └── drone_demo.launch
+│           ├── scripts/
+│           │   ├── mission_manager.py
+│           │   └── motion_controller.py
+│           └── src/drone_sorting/
+│               ├── control/
+│               ├── mission/
+│               ├── perception/
+│               └── planning/
+│
+└── Unity/
+    ├── Assets/
+    │   ├── Editor/
+    │   ├── Scenes/
+    │   └── Scripts/
+    ├── Packages/
+    └── ProjectSettings/
+```
+
+## Main Unity Scripts
+
+- `DroneRosSubscriber.cs` — receives movement commands from ROS and moves the drone.
+- `DroneStatePublisher.cs` — publishes the drone's current position to ROS.
+- `DroneObstacleSensorPublisher.cs` — detects nearby obstacles and publishes sensor distances.
+- `ObstacleCourseCamera.cs` — controls the simulation camera.
+
+## Main ROS Components
+
+### Mission Manager
+
+Publishes the current destination using:
+
+```text
+/drone/target_position
+```
+
+### Motion Controller
+
+Receives the drone position, target position, and obstacle readings.
+
+It calculates the next movement command and publishes:
+
+```text
+/drone/command_position
+```
+
+### Obstacle Avoidance Planner
+
+The planner can use several avoidance states:
+
+```text
+NORMAL
+CLIMB
+DESCEND
+PASS
+SIDESTEP_LEFT
+SIDESTEP_RIGHT
+```
+
+Possible movement actions include:
+
+```text
+FORWARD
+FORWARD_LEVEL
+UP
+DOWN
+LEFT
+RIGHT
+STOP
+```
 
 ## Requirements
 
 - Unity Editor 6000.6.0f1
-- ROS 1 Noetic (Ubuntu 20.04)
-- Git and Catkin build tools
+- ROS 1 Noetic
+- Ubuntu 20.04 ROS environment
+- Catkin
+- Unity ROS-TCP-Connector
+- ROS-TCP-Endpoint
 
-## Project Structure
+ROS-TCP-Endpoint should be installed separately from:
 
-- `Unity/` — Unity simulation, scenes, and C# scripts.
-- `ROS1/src/drone_sorting/` — ROS 1 Mission Manager.
-
-## Setup
-
-### 1. Unity
-
-Open Unity Hub and add the `Unity` folder as an existing project.
-
-Open `Assets/Scenes/SampleScene.unity`.
-
-Configure Robotics → ROS Settings:
-
-- Protocol: ROS1
-- IP: 127.0.0.1
-- Port: 10000
-
-### 2. ROS 1
-
-Create a Catkin workspace and copy the ROS package:
-
-```bash
-mkdir -p ~/drone_sorting_ros1_ws/src
-cp -r ROS1/src/drone_sorting ~/drone_sorting_ros1_ws/src/
+```text
+https://github.com/Unity-Technologies/ROS-TCP-Endpoint
 ```
 
-Install the Unity ROS-TCP-Endpoint:
+It is not included directly in this repository.
 
-```bash
-cd ~/drone_sorting_ros1_ws/src
+## Current Project Status
 
-git clone -b main \
-  https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
-```
+Working:
 
-Install dependencies and build:
+- ROS 1 and Unity communication
+- Target-based drone movement
+- Unity position feedback
+- Unity obstacle sensing
+- ROS motion control
+- Static obstacle avoidance
+- Automated obstacle-course traversal
 
-```bash
-sudo apt install -y python-is-python3 ros-noetic-tf2-msgs
+Future work:
 
-cd ~/drone_sorting_ros1_ws
-
-source /opt/ros/noetic/setup.bash
-catkin_make
-source devel/setup.bash
-```
-
-## Running the Simulation
-
-Open three terminals with the ROS 1 environment sourced.
-
-Terminal 1:
-
-```bash
-roscore
-```
-
-Terminal 2:
-
-```bash
-roslaunch ros_tcp_endpoint endpoint.launch \
-  tcp_ip:=127.0.0.1 \
-  tcp_port:=10000
-```
-
-Terminal 3:
-
-```bash
-rosrun drone_sorting mission_manager.py
-```
-
-Open Unity and click Play.
-
-The drone moves between Zone A and Zone B.
-
-## Current Status
-
-- ROS 1 and Unity communication: Working.
-- Automated movement between sorting zones: Working.
-- Obstacle avoidance: Planned.
+- Improve obstacle-avoidance reliability
+- Add additional sensors/camera-based perception
+- Package attachment
+- Package delivery between sorting zones
+- Dynamic obstacle avoidance
+- Full-system testing

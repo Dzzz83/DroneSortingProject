@@ -1,0 +1,23 @@
+<launch>
+    <!-- ROS-TCP bridge for Unity -->
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip" value="127.0.0.1" />
+        <arg name="tcp_port" value="10000" />
+    </include>
+
+    <!-- Chooses mission targets -->
+    <node
+        pkg="drone_sorting"
+        type="mission_manager.py"
+        name="mission_manager"
+        output="screen"
+    />
+
+    <!-- Calculates drone movement in ROS -->
+    <node
+        pkg="drone_sorting"
+        type="motion_controller.py"
+        name="motion_controller"
+        output="screen"
+    />
+</launch>
