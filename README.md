@@ -44,8 +44,10 @@ The project separates simulation from decision-making.
 
 **ROS 1** is responsible for:
 
-- Managing mission targets
+- Managing the delivery mission and mission states
+- Selecting pickup and drop-off targets
 - Processing position and sensor data
+- Requesting package pickup and drop actions
 - Deciding how the drone should avoid obstacles
 - Calculating the next movement command
 
@@ -61,7 +63,9 @@ DroneSortingProject/
 │   │   ├── start_demo.sh
 │   │   ├── stop_demo.sh
 │   │   ├── watch_obstacles.sh
-│   │   └── recompile_unity.sh
+│   │   ├── recompile_unity.sh
+│   │   ├── test_mission.sh
+│   │   └── test_full_mission.sh
 │   │
 │   └── src/drone_sorting/
 │       ├── launch/
@@ -71,6 +75,9 @@ DroneSortingProject/
 │       │   └── motion_controller.py
 │       └── src/drone_sorting/
 │           ├── mission/
+│           │   ├── mission_manager.py
+│           │   ├── mission_config.py
+│           │   └── mission_state.py
 │           ├── control/
 │           ├── planning/
 │           └── perception/
@@ -90,13 +97,67 @@ DroneSortingProject/
 
 #### Mission Manager
 
-The Mission Manager controls the high-level destination of the drone. It selects the current target position for the mission and publishes that target to:
+The Mission Manager controls the high-level package delivery mission. It decides which stage of the mission is currently active and selects the corresponding destination.
+
+The current mission sequence is:
+
+```text
+IDLE
+  ↓
+GO_TO_PICKUP
+  ↓
+WAIT_FOR_PICKUP
+  ↓
+GO_TO_DROPOFF
+  ↓
+WAIT_FOR_DROP
+  ↓
+COMPLETE
+```
+
+Pickup and drop-off positions are defined in `mission_config.py`, while the available mission states are defined in `mission_state.py`.
+
+The Mission Manager publishes the current destination through:
 
 ```text
 /drone/target_position
 ```
 
 The Motion Controller uses this position as the destination the drone should move toward.
+
+When the pickup or drop-off position is reached, the Mission Manager publishes a package command through:
+
+```text
+/drone/package_action
+```
+
+Possible commands are:
+
+```text
+PICKUP
+DROP
+```
+
+The mission then waits for confirmation through:
+
+```text
+/drone/package_action_status
+```
+
+Expected confirmations are:
+
+```text
+PICKUP_DONE
+DROP_DONE
+```
+
+The current mission state is also published through:
+
+```text
+/drone/mission_state
+```
+
+This allows the mission progress to be monitored and tested independently.
 
 #### Motion Controller
 
@@ -149,13 +210,20 @@ STOP
 
 #### Helper Scripts
 
-Scripts inside `ROS1/scripts/` simplify common development tasks such as:
+Scripts inside `ROS1/scripts/` simplify common development and testing tasks such as:
 
 - Building the ROS workspace
 - Starting the complete demo
 - Stopping the running ROS processes
 - Monitoring obstacle sensor data
 - Recompiling Unity-related components
+- Inspecting the current mission state and target
+- Manually sending pickup and drop confirmations
+- Automatically testing the full delivery mission
+
+`test_mission.sh` provides manual mission inspection and testing commands.
+
+`test_full_mission.sh` automatically verifies the complete ROS mission sequence from pickup to mission completion.
 
 ### Unity Components
 
@@ -179,7 +247,9 @@ Continuously reports the drone's current Unity position to ROS through:
 /drone/current_position
 ```
 
-This gives the Motion Controller feedback about where the drone actually is after each movement.
+This gives both the Motion Controller and Mission Manager feedback about where the drone actually is.
+
+The Motion Controller uses the position for navigation, while the Mission Manager uses it to determine when the drone has reached the pickup or drop-off target.
 
 #### DroneObstacleSensorPublisher.cs
 
@@ -228,15 +298,11 @@ Mission Manager
       |
       | /drone/target_position
       v
-Motion Controller
-      ^
+Motion Controller <──── /drone/current_position ──── Unity
+      ^                                             |
+      |                                             |
+      └──── /drone/obstacle_distances ──────────────┘
       |
-      | /drone/current_position
-      | /drone/obstacle_distances
-      |
-    Unity
-      |
-      v
 Obstacle Avoidance Planner
       |
       v
@@ -246,32 +312,51 @@ Motion Controller
       v
 Unity Drone
       |
-      └──────── updated position and sensor data ────────> ROS
+      └──── updated position and sensor data ──────> ROS
+
+
+Package Mission Interface
+
+Mission Manager
+      |
+      | /drone/package_action
+      | PICKUP / DROP
+      v
+Unity Package System
+      |
+      | /drone/package_action_status
+      | PICKUP_DONE / DROP_DONE
+      v
+Mission Manager
 ```
 
 Main ROS topics:
 
 | Topic | Purpose |
 |---|---|
-| `/drone/target_position` | Destination selected by the Mission Manager |
+| `/drone/target_position` | Current pickup or drop-off destination selected by the Mission Manager |
 | `/drone/current_position` | Current drone position reported by Unity |
 | `/drone/obstacle_distances` | Obstacle sensor readings reported by Unity |
 | `/drone/command_position` | Next safe movement position calculated by ROS |
 | `/drone/travel_heading` | Current direction of travel |
+| `/drone/mission_state` | Current stage of the delivery mission |
+| `/drone/package_action` | Pickup or drop command sent by the Mission Manager |
+| `/drone/package_action_status` | Confirmation that the requested package action has completed |
 
 ## Workflow
 
-1. The Mission Manager selects the current destination.
-2. Unity reports the drone's current position.
-3. Unity measures nearby obstacles.
-4. ROS receives the position and obstacle data.
-5. The Motion Controller checks whether the direct path is safe.
-6. The Obstacle Avoidance Planner selects an appropriate movement action if an obstacle is detected.
-7. The Motion Controller calculates the next command position.
-8. ROS publishes `/drone/command_position`.
-9. Unity moves the drone toward that position.
-10. Unity sends updated position and sensor data back to ROS.
-11. The control loop repeats until the target is reached.
+1. The Mission Manager starts the mission in `GO_TO_PICKUP`.
+2. The pickup position is published through `/drone/target_position`.
+3. Unity continuously reports the drone's current position and obstacle sensor readings.
+4. The Motion Controller and Obstacle Avoidance Planner calculate safe movement commands.
+5. ROS publishes `/drone/command_position`, and Unity moves the drone.
+6. The control loop continues until the Mission Manager detects that the pickup point has been reached.
+7. The mission changes to `WAIT_FOR_PICKUP` and publishes `PICKUP`.
+8. After receiving `PICKUP_DONE`, the Mission Manager changes to `GO_TO_DROPOFF`.
+9. The drop-off position becomes the new target.
+10. The normal ROS navigation and obstacle avoidance loop continues until the drop-off point is reached.
+11. The mission changes to `WAIT_FOR_DROP` and publishes `DROP`.
+12. After receiving `DROP_DONE`, the mission changes to `COMPLETE`.
 
 ## Installation
 
@@ -429,12 +514,16 @@ Currently working:
 - Static obstacle avoidance
 - Automatic climbing and descending
 - Side-step avoidance support
-- Repeated obstacle-course traversal
+- ROS delivery mission state machine
+- Automatic pickup and drop-off target switching
+- Pickup and drop command interface
+- Mission-state monitoring
+- Automated full mission testing
 
 Planned work:
 
 - Improved sensing
-- Package attachment
-- Package delivery
+- Unity package attachment and detachment
+- Integration of the ROS package commands with the Unity package system
 - Dynamic obstacle avoidance
 - Full-system testing

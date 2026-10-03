@@ -53,13 +53,13 @@ class MissionManager:
         rospy.Subscriber(
             "/drone/current_position",
             Point,
-            self._position_callback,
+            self._on_position_update,
         )
 
         rospy.Subscriber(
             "/drone/package_action_status",
             String,
-            self._package_action_status_callback,
+            self._on_package_status,
         )
 
         self.mission_state_publisher.publish(
@@ -71,21 +71,20 @@ class MissionManager:
 
         rospy.sleep(0.5)
 
-        self._set_state(MissionState.GO_TO_PICKUP)
-        self._set_target(self.pickup_position)
+        self._start_pickup_mission()
 
         rospy.spin()
 
-    def _position_callback(self, position):
+    def _on_position_update(self, position):
         self.current_position = position
 
         if self.state == MissionState.GO_TO_PICKUP:
-            self._update_go_to_pickup()
+            self._check_pickup_arrival()
 
         elif self.state == MissionState.GO_TO_DROPOFF:
-            self._update_go_to_dropoff()
+            self._check_dropoff_arrival()
 
-    def _package_action_status_callback(self, message):
+    def _on_package_status(self, message):
         status = message.data.strip().upper()
 
         if (
@@ -93,25 +92,20 @@ class MissionManager:
             and status == "PICKUP_DONE"
         ):
             rospy.loginfo("Pickup confirmed")
-
-            self._clear_package_action()
-
-            self._set_state(MissionState.GO_TO_DROPOFF)
-            self._set_target(self.dropoff_position)
+            self._start_dropoff_mission()
 
         elif (
             self.state == MissionState.WAIT_FOR_DROP
             and status == "DROP_DONE"
         ):
             rospy.loginfo("Drop confirmed")
+            self._complete_mission()
 
-            self._clear_package_action()
+    def _start_pickup_mission(self):
+        self._set_state(MissionState.GO_TO_PICKUP)
+        self._set_target(self.pickup_position)
 
-            self._set_state(MissionState.COMPLETE)
-
-            rospy.loginfo("Mission complete")
-
-    def _update_go_to_pickup(self):
+    def _check_pickup_arrival(self):
         if not self._has_reached_target():
             return
 
@@ -120,7 +114,13 @@ class MissionManager:
         self._set_state(MissionState.WAIT_FOR_PICKUP)
         self._request_pickup()
 
-    def _update_go_to_dropoff(self):
+    def _start_dropoff_mission(self):
+        self._clear_package_action()
+
+        self._set_state(MissionState.GO_TO_DROPOFF)
+        self._set_target(self.dropoff_position)
+
+    def _check_dropoff_arrival(self):
         if not self._has_reached_target():
             return
 
@@ -128,6 +128,13 @@ class MissionManager:
 
         self._set_state(MissionState.WAIT_FOR_DROP)
         self._request_drop()
+
+    def _complete_mission(self):
+        self._clear_package_action()
+
+        self._set_state(MissionState.COMPLETE)
+
+        rospy.loginfo("Mission complete")
 
     def _request_pickup(self):
         self.package_action_publisher.publish(
