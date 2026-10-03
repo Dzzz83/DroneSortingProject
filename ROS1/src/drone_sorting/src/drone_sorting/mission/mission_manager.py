@@ -2,34 +2,25 @@ import math
 
 import rospy
 from geometry_msgs.msg import Point, Vector3
+from std_msgs.msg import String
+
+from drone_sorting.mission.mission_config import MissionConfig
+from drone_sorting.mission.mission_state import MissionState
 
 
 class MissionManager:
-    """
-    Sends the drone back and forth between two endpoints.
-
-    ROS also publishes the stable travel heading so Unity
-    sensors always know which direction is "front".
-    """
+    """Controls the high-level package delivery mission."""
 
     def __init__(self):
-        self.targets = [
-            Point(x=18.0, y=0.0, z=2.0),
-            Point(x=0.0, y=0.0, z=2.0),
-        ]
+        self.state = MissionState.IDLE
 
-        # Corresponding stable horizontal headings.
-        self.headings = [
-            Vector3(x=1.0, y=0.0, z=0.0),   # toward x=18
-            Vector3(x=-1.0, y=0.0, z=0.0),  # toward x=0
-        ]
+        self.pickup_position = MissionConfig.PICKUP_POSITION
+        self.dropoff_position = MissionConfig.DROPOFF_POSITION
 
-        self.target_index = 0
+        self.current_position = None
+        self.current_target = None
 
-        self.arrival_tolerance = 0.25
-        self.switch_delay = 1.0
-
-        self.waiting_to_switch = False
+        self.arrival_tolerance = MissionConfig.ARRIVAL_TOLERANCE
 
         self.target_publisher = rospy.Publisher(
             "/drone/target_position",
@@ -45,10 +36,34 @@ class MissionManager:
             latch=True,
         )
 
+        self.package_action_publisher = rospy.Publisher(
+            "/drone/package_action",
+            String,
+            queue_size=1,
+            latch=True,
+        )
+
+        self.mission_state_publisher = rospy.Publisher(
+            "/drone/mission_state",
+            String,
+            queue_size=1,
+            latch=True,
+        )
+
         rospy.Subscriber(
             "/drone/current_position",
             Point,
             self._position_callback,
+        )
+
+        rospy.Subscriber(
+            "/drone/package_action_status",
+            String,
+            self._package_action_status_callback,
+        )
+
+        self.mission_state_publisher.publish(
+            String(data=self.state.name)
         )
 
     def run(self):
@@ -56,65 +71,148 @@ class MissionManager:
 
         rospy.sleep(0.5)
 
-        self._publish_mission()
+        self._set_state(MissionState.GO_TO_PICKUP)
+        self._set_target(self.pickup_position)
 
         rospy.spin()
 
     def _position_callback(self, position):
-        if self.waiting_to_switch:
+        self.current_position = position
+
+        if self.state == MissionState.GO_TO_PICKUP:
+            self._update_go_to_pickup()
+
+        elif self.state == MissionState.GO_TO_DROPOFF:
+            self._update_go_to_dropoff()
+
+    def _package_action_status_callback(self, message):
+        status = message.data.strip().upper()
+
+        if (
+            self.state == MissionState.WAIT_FOR_PICKUP
+            and status == "PICKUP_DONE"
+        ):
+            rospy.loginfo("Pickup confirmed")
+
+            self._clear_package_action()
+
+            self._set_state(MissionState.GO_TO_DROPOFF)
+            self._set_target(self.dropoff_position)
+
+        elif (
+            self.state == MissionState.WAIT_FOR_DROP
+            and status == "DROP_DONE"
+        ):
+            rospy.loginfo("Drop confirmed")
+
+            self._clear_package_action()
+
+            self._set_state(MissionState.COMPLETE)
+
+            rospy.loginfo("Mission complete")
+
+    def _update_go_to_pickup(self):
+        if not self._has_reached_target():
             return
 
-        target = self.targets[self.target_index]
+        rospy.loginfo("Pickup point reached")
 
-        dx = target.x - position.x
-        dy = target.y - position.y
-        dz = target.z - position.z
+        self._set_state(MissionState.WAIT_FOR_PICKUP)
+        self._request_pickup()
 
-        distance = math.sqrt(
-            dx * dx +
-            dy * dy +
-            dz * dz
+    def _update_go_to_dropoff(self):
+        if not self._has_reached_target():
+            return
+
+        rospy.loginfo("Drop-off point reached")
+
+        self._set_state(MissionState.WAIT_FOR_DROP)
+        self._request_drop()
+
+    def _request_pickup(self):
+        self.package_action_publisher.publish(
+            String(data="PICKUP")
         )
 
-        if distance <= self.arrival_tolerance:
-            rospy.loginfo(
-                "Reached target -> "
-                "x=%.2f y=%.2f z=%.2f",
-                target.x,
-                target.y,
-                target.z,
-            )
+        rospy.loginfo("Pickup requested")
 
-            self.waiting_to_switch = True
+    def _request_drop(self):
+        self.package_action_publisher.publish(
+            String(data="DROP")
+        )
 
-            rospy.Timer(
-                rospy.Duration(self.switch_delay),
-                self._switch_target,
-                oneshot=True,
-            )
+        rospy.loginfo("Drop requested")
 
-    def _switch_target(self, _event):
-        self.target_index = (
-            self.target_index + 1
-        ) % len(self.targets)
+    def _clear_package_action(self):
+        self.package_action_publisher.publish(
+            String(data="")
+        )
 
-        self.waiting_to_switch = False
+    def _has_reached_target(self):
+        if self.current_position is None or self.current_target is None:
+            return False
 
-        self._publish_mission()
+        dx = self.current_target.x - self.current_position.x
+        dy = self.current_target.y - self.current_position.y
+        dz = self.current_target.z - self.current_position.z
 
-    def _publish_mission(self):
-        target = self.targets[self.target_index]
-        heading = self.headings[self.target_index]
+        distance = math.sqrt(
+            dx * dx
+            + dy * dy
+            + dz * dz
+        )
+
+        return distance <= self.arrival_tolerance
+
+    def _set_target(self, target):
+        self.current_target = target
+
+        heading = self._calculate_heading(
+            self.current_position,
+            target,
+        )
 
         self.target_publisher.publish(target)
         self.heading_publisher.publish(heading)
 
         rospy.loginfo(
-            "Mission target -> "
-            "x=%.2f y=%.2f z=%.2f | "
-            "heading x=%.1f",
+            "Mission target -> x=%.2f y=%.2f z=%.2f",
             target.x,
             target.y,
             target.z,
-            heading.x,
+        )
+
+    def _set_state(self, new_state):
+        if self.state == new_state:
+            return
+
+        rospy.loginfo(
+            "Mission state: %s -> %s",
+            self.state.name,
+            new_state.name,
+        )
+
+        self.state = new_state
+
+        self.mission_state_publisher.publish(
+            String(data=self.state.name)
+        )
+
+    @staticmethod
+    def _calculate_heading(current_position, target):
+        if current_position is None:
+            return Vector3(x=1.0, y=0.0, z=0.0)
+
+        dx = target.x - current_position.x
+        dy = target.y - current_position.y
+
+        length = math.sqrt(dx * dx + dy * dy)
+
+        if length == 0.0:
+            return Vector3(x=1.0, y=0.0, z=0.0)
+
+        return Vector3(
+            x=dx / length,
+            y=dy / length,
+            z=0.0,
         )
