@@ -4,6 +4,8 @@ import rospy
 from geometry_msgs.msg import Point, Vector3
 from std_msgs.msg import String
 
+from drone_sorting.interfaces import ros_topics
+
 from drone_sorting.mission.mission_config import MissionConfig
 from drone_sorting.mission.mission_state import MissionState
 
@@ -23,41 +25,41 @@ class MissionManager:
         self.arrival_tolerance = MissionConfig.ARRIVAL_TOLERANCE
 
         self.target_publisher = rospy.Publisher(
-            "/drone/target_position",
+            ros_topics.TARGET_POSITION,
             Point,
             queue_size=1,
             latch=True,
         )
 
         self.heading_publisher = rospy.Publisher(
-            "/drone/travel_heading",
+            ros_topics.TRAVEL_HEADING,
             Vector3,
             queue_size=1,
             latch=True,
         )
 
         self.package_action_publisher = rospy.Publisher(
-            "/drone/package_action",
+            ros_topics.PACKAGE_ACTION,
             String,
             queue_size=1,
             latch=True,
         )
 
         self.mission_state_publisher = rospy.Publisher(
-            "/drone/mission_state",
+            ros_topics.MISSION_STATE,
             String,
             queue_size=1,
             latch=True,
         )
 
         rospy.Subscriber(
-            "/drone/current_position",
+            ros_topics.CURRENT_POSITION,
             Point,
             self._on_position_update,
         )
 
         rospy.Subscriber(
-            "/drone/package_action_status",
+            ros_topics.PACKAGE_ACTION_STATUS,
             String,
             self._on_package_status,
         )

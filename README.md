@@ -60,10 +60,9 @@ DroneSortingProject/
 ├── ROS1/
 │   ├── scripts/
 │   │   ├── build_ros.sh
-│   │   ├── start_demo.sh
+│   │   ├── run_delivery_demo.sh
 │   │   ├── stop_demo.sh
 │   │   ├── watch_obstacles.sh
-│   │   ├── recompile_unity.sh
 │   │   ├── test_mission.sh
 │   │   └── test_full_mission.sh
 │   │
@@ -71,8 +70,8 @@ DroneSortingProject/
 │       ├── launch/
 │       │   └── drone_demo.launch
 │       ├── scripts/
-│       │   ├── mission_manager.py
-│       │   └── motion_controller.py
+│       │   ├── mission_manager_node.py
+│       │   └── motion_controller_node.py
 │       └── src/drone_sorting/
 │           ├── mission/
 │           │   ├── mission_manager.py

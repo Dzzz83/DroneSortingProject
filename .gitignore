@@ -1,4 +1,7 @@
+# ============================================================
 # Unity generated files
+# ============================================================
+
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
@@ -7,26 +10,59 @@
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 
-# Unity generated IDE files
+# Unity recovery and crash artifacts
+Unity/Assets/_Recovery/
+Unity/mono_crash.mem.*
+
+
+# ============================================================
+# Unity / IDE generated files
+# ============================================================
+
 .vs/
-.vscode/
 .idea/
+
 *.csproj
 *.sln
 *.slnx
 *.user
 
+
+# ============================================================
+# VS Code
+# ============================================================
+
+# Ignore personal VS Code configuration by default.
+.vscode/*
+
+# Keep shared project tasks in Git.
+!.vscode/tasks.json
+
+# Unity-generated VS Code workspace configuration
+Unity/.vscode/
+
+# ============================================================
 # ROS generated files
+# ============================================================
+
 ROS1/build/
 ROS1/devel/
 ROS1/install/
 ROS1/log/
 ROS1/logs/
 
+
+# ============================================================
 # Python generated files
+# ============================================================
+
 __pycache__/
 *.pyc
 
-# OS files
+
+# ============================================================
+# Operating system files
+# ============================================================
+
 .DS_Store
 Thumbs.db

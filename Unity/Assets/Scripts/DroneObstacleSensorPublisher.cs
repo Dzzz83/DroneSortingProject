@@ -7,10 +7,10 @@ public class DroneObstacleSensorPublisher : MonoBehaviour
 {
     [Header("ROS")]
     [SerializeField]
-    private string topicName = "/drone/obstacle_distances";
+    private string topicName = DroneRosTopics.ObstacleDistances;
 
     [SerializeField]
-    private string headingTopicName = "/drone/travel_heading";
+    private string headingTopicName = DroneRosTopics.TravelHeading;
 
     [Header("Sensor Settings")]
     [SerializeField]
@@ -155,7 +155,7 @@ public class DroneObstacleSensorPublisher : MonoBehaviour
             sensorRadius,
             direction.normalized,
             maxDistance,
-            ~0,
+            Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore
         );
 

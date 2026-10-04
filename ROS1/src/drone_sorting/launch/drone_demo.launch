@@ -1,23 +1,37 @@
 <launch>
+    <!--
+        Obstacle avoidance stays enabled by default.
+        Specific demos can override this argument.
+    -->
+    <arg
+        name="enable_obstacle_avoidance"
+        default="true"
+    />
+
     <!-- ROS-TCP bridge for Unity -->
     <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
         <arg name="tcp_ip" value="127.0.0.1" />
         <arg name="tcp_port" value="10000" />
     </include>
 
-    <!-- Chooses mission targets -->
+    <!-- High-level package delivery mission -->
     <node
         pkg="drone_sorting"
-        type="mission_manager.py"
+        type="mission_manager_node.py"
         name="mission_manager"
         output="screen"
     />
 
-    <!-- Calculates drone movement in ROS -->
+    <!-- ROS movement controller -->
     <node
         pkg="drone_sorting"
-        type="motion_controller.py"
+        type="motion_controller_node.py"
         name="motion_controller"
         output="screen"
-    />
+    >
+        <param
+            name="enable_obstacle_avoidance"
+            value="$(arg enable_obstacle_avoidance)"
+        />
+    </node>
 </launch>

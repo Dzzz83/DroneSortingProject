@@ -5,7 +5,7 @@ using RosMessageTypes.Geometry;
 public class DroneStatePublisher : MonoBehaviour
 {
     [SerializeField]
-    private string topicName = "/drone/current_position";
+    private string topicName = DroneRosTopics.CurrentPosition;
 
     [SerializeField]
     private float publishRate = 0.2f;

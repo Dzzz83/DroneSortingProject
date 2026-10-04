@@ -2,7 +2,7 @@ using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
 using RosMessageTypes.Geometry;
 
-public class DroneRosSubscriber : MonoBehaviour
+public class DroneCommandSubscriber : MonoBehaviour
 {
     private ROSConnection ros;
 
@@ -11,7 +11,7 @@ public class DroneRosSubscriber : MonoBehaviour
         ros = ROSConnection.GetOrCreateInstance();
 
         ros.Subscribe<PointMsg>(
-            "/drone/command_position",
+            DroneRosTopics.CommandPosition,
             ReceivePosition
         );
     }

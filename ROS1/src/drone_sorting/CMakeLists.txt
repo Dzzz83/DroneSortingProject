@@ -20,8 +20,8 @@ catkin_package(
 # ROS executable nodes
 catkin_install_python(
   PROGRAMS
-    scripts/mission_manager.py
-    scripts/motion_controller.py
+    scripts/mission_manager_node.py
+    scripts/motion_controller_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

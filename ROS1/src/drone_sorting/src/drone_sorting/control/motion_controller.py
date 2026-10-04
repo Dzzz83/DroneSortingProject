@@ -3,14 +3,24 @@ import math
 import rospy
 from geometry_msgs.msg import Point
 from std_msgs.msg import Float32MultiArray
+from drone_sorting.interfaces import ros_topics
 
-from drone_sorting.planning.obstacle_avoidance import ObstacleAvoidancePlanner
+from drone_sorting.planning.obstacle_avoidance import (
+    ObstacleAvoidancePlanner,
+)
 
 
 class MotionController:
     def __init__(self):
         self.speed = 2.0
         self.update_rate = 20.0
+
+        # Allows obstacle avoidance to be disabled
+        # for delivery demonstrations.
+        self.enable_obstacle_avoidance = rospy.get_param(
+            "~enable_obstacle_avoidance",
+            True,
+        )
 
         self.current_position = None
         self.target_position = None
@@ -25,30 +35,38 @@ class MotionController:
         self.last_status_log_time = 0.0
 
         self.command_publisher = rospy.Publisher(
-            "/drone/command_position",
+            ros_topics.COMMAND_POSITION,
             Point,
             queue_size=10,
         )
 
         rospy.Subscriber(
-            "/drone/current_position",
+            ros_topics.CURRENT_POSITION,
             Point,
             self._current_position_callback,
         )
 
         rospy.Subscriber(
-            "/drone/target_position",
+            ros_topics.TARGET_POSITION,
             Point,
             self._target_position_callback,
         )
 
         rospy.Subscriber(
-            "/drone/obstacle_distances",
+            ros_topics.OBSTACLE_DISTANCES,
             Float32MultiArray,
             self._obstacle_callback,
         )
 
-        rospy.loginfo("Motion Controller started")
+        rospy.loginfo(
+            "Motion Controller started "
+            "(obstacle avoidance: %s)",
+            (
+                "ENABLED"
+                if self.enable_obstacle_avoidance
+                else "DISABLED"
+            ),
+        )
 
     def run(self):
         rate = rospy.Rate(self.update_rate)
@@ -57,42 +75,56 @@ class MotionController:
             self._update_command()
             rate.sleep()
 
-    def _current_position_callback(self, message):
+    def _current_position_callback(
+        self,
+        message,
+    ):
         self.current_position = Point(
             x=message.x,
             y=message.y,
             z=message.z,
         )
 
-        # Synchronize ROS command position with the actual Unity position.
+        # Synchronize ROS command position
+        # with the actual Unity position.
         self.command_position = Point(
             x=message.x,
             y=message.y,
             z=message.z,
         )
 
-    def _target_position_callback(self, message):
+    def _target_position_callback(
+        self,
+        message,
+    ):
         self.target_position = Point(
             x=message.x,
             y=message.y,
             z=message.z,
         )
 
-        # New mission target -> reset the stateful avoidance planner.
+        # New mission target -> reset the
+        # stateful avoidance planner.
         self.avoidance_planner.reset()
 
         rospy.loginfo(
-            "Received target -> x=%.2f y=%.2f z=%.2f",
+            "Received target -> "
+            "x=%.2f y=%.2f z=%.2f",
             message.x,
             message.y,
             message.z,
         )
 
-    def _obstacle_callback(self, message):
+    def _obstacle_callback(
+        self,
+        message,
+    ):
         if len(message.data) < 7:
             return
 
-        self.obstacle_distances = tuple(message.data[:7])
+        self.obstacle_distances = tuple(
+            message.data[:7]
+        )
 
     def _update_command(self):
         if self.command_position is None:
@@ -101,10 +133,22 @@ class MotionController:
         if self.target_position is None:
             return
 
-        # Difference between current commanded position and target.
-        dx = self.target_position.x - self.command_position.x
-        dy = self.target_position.y - self.command_position.y
-        dz = self.target_position.z - self.command_position.z
+        # Difference between current commanded
+        # position and mission target.
+        dx = (
+            self.target_position.x
+            - self.command_position.x
+        )
+
+        dy = (
+            self.target_position.y
+            - self.command_position.y
+        )
+
+        dz = (
+            self.target_position.z
+            - self.command_position.z
+        )
 
         distance = math.sqrt(
             dx * dx
@@ -114,23 +158,33 @@ class MotionController:
 
         # Already effectively at the target.
         if distance <= 0.01:
-            self.command_publisher.publish(self.command_position)
+            self.command_publisher.publish(
+                self.command_position
+            )
             return
 
-        # Normalized direction toward the mission target.
+        # Normalized direction toward the
+        # mission target.
         target_direction = (
             dx / distance,
             dy / distance,
             dz / distance,
         )
 
-        # Ask the obstacle avoidance planner what the drone should do.
-        decision = self.avoidance_planner.choose_direction(
-            self.obstacle_distances,
-            self.command_position,
-        )
+        # Use the avoidance planner when enabled.
+        # Otherwise, move directly toward the target.
+        if self.enable_obstacle_avoidance:
+            decision = (
+                self.avoidance_planner.choose_direction(
+                    self.obstacle_distances,
+                    self.command_position,
+                )
+            )
+        else:
+            decision = (
+                self.avoidance_planner.FORWARD
+            )
 
-        # Convert planner decision into movement direction.
         movement = self._movement_direction(
             decision,
             target_direction,
@@ -145,14 +199,26 @@ class MotionController:
             self._log_status(decision)
             return
 
-        # 2 m/s / 20 Hz = approximately 0.1 m per update.
-        step = self.speed / self.update_rate
+        # 2 m/s / 20 Hz =
+        # approximately 0.1 m per update.
+        step = (
+            self.speed
+            / self.update_rate
+        )
 
         move_x, move_y, move_z = movement
 
-        self.command_position.x += move_x * step
-        self.command_position.y += move_y * step
-        self.command_position.z += move_z * step
+        self.command_position.x += (
+            move_x * step
+        )
+
+        self.command_position.y += (
+            move_y * step
+        )
+
+        self.command_position.z += (
+            move_z * step
+        )
 
         # Send calculated position to Unity.
         self.command_publisher.publish(
@@ -167,11 +233,17 @@ class MotionController:
         target_direction,
     ):
         # Move normally toward the full XYZ target.
-        if decision == self.avoidance_planner.FORWARD:
+        if (
+            decision
+            == self.avoidance_planner.FORWARD
+        ):
             return target_direction
 
         # Move vertically upward.
-        if decision == self.avoidance_planner.UP:
+        if (
+            decision
+            == self.avoidance_planner.UP
+        ):
             return (
                 0.0,
                 0.0,
@@ -179,38 +251,56 @@ class MotionController:
             )
 
         # Move vertically downward.
-        if decision == self.avoidance_planner.DOWN:
+        if (
+            decision
+            == self.avoidance_planner.DOWN
+        ):
             return (
                 0.0,
                 0.0,
                 -1.0,
             )
 
-        # Move horizontally toward the target while
-        # preserving the current altitude.
-        if decision == self.avoidance_planner.FORWARD_LEVEL:
+        # Move horizontally toward the target
+        # while preserving current altitude.
+        if (
+            decision
+            == self.avoidance_planner.FORWARD_LEVEL
+        ):
             return self._horizontal_forward(
                 target_direction
             )
 
-        horizontal_forward = self._horizontal_forward(
-            target_direction
+        horizontal_forward = (
+            self._horizontal_forward(
+                target_direction
+            )
         )
 
         if horizontal_forward is None:
             return None
 
-        forward_x, forward_y, _ = horizontal_forward
+        (
+            forward_x,
+            forward_y,
+            _,
+        ) = horizontal_forward
 
         # Perpendicular movement for sidestepping.
-        if decision == self.avoidance_planner.LEFT:
+        if (
+            decision
+            == self.avoidance_planner.LEFT
+        ):
             return (
                 -forward_y,
                 forward_x,
                 0.0,
             )
 
-        if decision == self.avoidance_planner.RIGHT:
+        if (
+            decision
+            == self.avoidance_planner.RIGHT
+        ):
             return (
                 forward_y,
                 -forward_x,
@@ -221,7 +311,9 @@ class MotionController:
         return None
 
     @staticmethod
-    def _horizontal_forward(target_direction):
+    def _horizontal_forward(
+        target_direction,
+    ):
         x = target_direction[0]
         y = target_direction[1]
 
@@ -241,19 +333,22 @@ class MotionController:
 
     @staticmethod
     def _format_sensor(value):
-        # Unity uses -1 to mean that no obstacle
-        # was detected within sensor range.
+        # Unity uses -1 to mean that
+        # no obstacle was detected.
         if value < 0.0:
             return "CLEAR"
 
         return f"{value:.2f}"
 
-    def _log_status(self, decision):
+    def _log_status(
+        self,
+        decision,
+    ):
         now = rospy.get_time()
 
-        # Only display the block twice per second.
         if (
-            now - self.last_status_log_time
+            now
+            - self.last_status_log_time
             < self.status_log_interval
         ):
             return
@@ -269,7 +364,6 @@ class MotionController:
         if self.command_position is None:
             return
 
-        # Format sensor values.
         if self.obstacle_distances is None:
             sensor_values = [
                 "WAITING",
@@ -283,7 +377,8 @@ class MotionController:
         else:
             sensor_values = [
                 self._format_sensor(value)
-                for value in self.obstacle_distances
+                for value
+                in self.obstacle_distances
             ]
 
         (
@@ -296,14 +391,14 @@ class MotionController:
             down,
         ) = sensor_values
 
-        # Get planner's current internal state.
-        # If the planner does not expose it,
-        # display UNKNOWN instead of crashing.
-        planner_mode = getattr(
-            self.avoidance_planner,
-            "mode",
-            "UNKNOWN",
-        )
+        if self.enable_obstacle_avoidance:
+            planner_mode = getattr(
+                self.avoidance_planner,
+                "mode",
+                "UNKNOWN",
+            )
+        else:
+            planner_mode = "DISABLED"
 
         action = str(decision).upper()
 

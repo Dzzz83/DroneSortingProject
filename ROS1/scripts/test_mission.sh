@@ -16,7 +16,7 @@ check_ros() {
     if ! run_ros "rostopic list >/dev/null 2>&1"; then
         echo "ROS is not running."
         echo "Start it with:"
-        echo "  ./ROS1/scripts/start_demo.sh"
+        echo "  ./ROS1/scripts/run_delivery_demo.sh"
         exit 1
     fi
 }
