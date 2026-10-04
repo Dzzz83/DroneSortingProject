@@ -1,0 +1,9 @@
+Warehouse drone auto-run result
+Status: OK
+Time: 2026-10-04 02:02:49
+Scene: Assets/Scenes/MainWarehouse.unity
+Root: Member2_DroneSystem
+Drone: (34, 2, 10)
+Package: (34, 0.43, 25)
+Delivery target: SortingZoneA (28, 0.43, 55)
+Automatic mission: enabled

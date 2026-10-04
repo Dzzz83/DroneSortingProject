@@ -9,24 +9,18 @@ public class ObstacleCourseCamera : MonoBehaviour
 
     private Camera sceneCamera;
     private Bounds courseBounds;
+    private Quaternion initialRotation;
 
     // Automatically configure the camera when Play starts.
-    // No manual component attachment required.
-    [RuntimeInitializeOnLoadMethod(
-        RuntimeInitializeLoadType.AfterSceneLoad)]
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Initialize()
     {
-        GameObject course =
-            GameObject.Find("ObstacleCourse");
-
+        GameObject course = GameObject.Find("ObstacleCourse");
         Camera mainCamera = Camera.main;
 
         if (course == null || mainCamera == null)
         {
-            Debug.LogWarning(
-                "Camera setup: obstacle course or Main Camera not found."
-            );
-
+            Debug.LogWarning("Camera setup: obstacle course or Main Camera not found.");
             return;
         }
 
@@ -40,8 +34,10 @@ public class ObstacleCourseCamera : MonoBehaviour
     {
         sceneCamera = GetComponent<Camera>();
 
-        GameObject course =
-            GameObject.Find("ObstacleCourse");
+        // Cache the rotation angle configured in the Scene View / Inspector
+        initialRotation = transform.rotation;
+
+        GameObject course = GameObject.Find("ObstacleCourse");
 
         if (course == null)
         {
@@ -49,8 +45,7 @@ public class ObstacleCourseCamera : MonoBehaviour
             return;
         }
 
-        Renderer[] renderers =
-            course.GetComponentsInChildren<Renderer>();
+        Renderer[] renderers = course.GetComponentsInChildren<Renderer>();
 
         if (renderers.Length == 0)
         {
@@ -58,9 +53,7 @@ public class ObstacleCourseCamera : MonoBehaviour
             return;
         }
 
-        // Calculate the boundaries of the entire
-        // obstacle course, including the floor,
-        // ceiling, obstacles, and destination markers.
+        // Calculate boundaries of the entire obstacle course
         courseBounds = renderers[0].bounds;
 
         foreach (Renderer renderer in renderers)
@@ -68,22 +61,16 @@ public class ObstacleCourseCamera : MonoBehaviour
             courseBounds.Encapsulate(renderer.bounds);
         }
 
-        sceneCamera.orthographic = true;
-
         sceneCamera.nearClipPlane = 0.1f;
-        sceneCamera.farClipPlane = 100f;
+        sceneCamera.farClipPlane = 1000f;
 
         UpdateCamera();
 
-        Debug.Log(
-            "Camera configured: entire obstacle course is visible."
-        );
+        Debug.Log("Camera configured: entire obstacle course is visible.");
     }
 
     private void LateUpdate()
     {
-        // Maintain the correct framing even when
-        // the Game window is resized.
         UpdateCamera();
     }
 
@@ -92,28 +79,19 @@ public class ObstacleCourseCamera : MonoBehaviour
         if (sceneCamera == null)
             return;
 
-        // Position the camera in front of the course.
+        // Apply the saved rotation angle set in the Scene view
+        transform.rotation = initialRotation;
+
+        // Position the camera relative to its current rotation vector
         Vector3 center = courseBounds.center;
+        transform.position = center - (transform.forward * cameraDistance);
 
-        transform.position = new Vector3(
-            center.x,
-            center.y,
-            courseBounds.min.z - cameraDistance
-        );
-
-        // Look directly toward the obstacle course.
-        transform.rotation = Quaternion.identity;
-
-        // Calculate the camera size needed to fit
-        // the entire course horizontally and vertically.
-        float requiredHeight =
-            courseBounds.extents.y + verticalPadding;
-
-        float requiredWidth =
-            (courseBounds.extents.x + horizontalPadding)
-            / Mathf.Max(sceneCamera.aspect, 0.1f);
-
-        sceneCamera.orthographicSize =
-            Mathf.Max(requiredHeight, requiredWidth);
+        // Adjust orthographic sizing if orthographic mode is used
+        if (sceneCamera.orthographic)
+        {
+            float requiredHeight = courseBounds.extents.y + verticalPadding;
+            float requiredWidth = (courseBounds.extents.x + horizontalPadding) / Mathf.Max(sceneCamera.aspect, 0.1f);
+            sceneCamera.orthographicSize = Mathf.Max(requiredHeight, requiredWidth);
+        }
     }
 }

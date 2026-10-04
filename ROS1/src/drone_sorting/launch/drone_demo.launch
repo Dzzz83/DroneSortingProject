@@ -10,8 +10,8 @@
 
     <!-- ROS-TCP bridge for Unity -->
     <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
-        <arg name="tcp_ip" value="127.0.0.1" />
-        <arg name="tcp_port" value="10000" />
+        <arg name="tcp_ip" default="0.0.0.0" />
+        <arg name="tcp_port" default="10000" />
     </include>
 
     <!-- High-level package delivery mission -->
