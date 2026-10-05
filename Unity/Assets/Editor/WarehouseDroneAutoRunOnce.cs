@@ -45,23 +45,8 @@ public static class WarehouseDroneAutoRunOnce
             GameObject drone = RequireObject(DroneName);
             GameObject root = RequireObject(RootName);
 
-            if (drone.GetComponent<PackageHandling>() == null)
-                throw new InvalidOperationException("Drone is missing PackageHandling.");
-
-            EnsureComponent<DroneCommandSubscriber>(drone);
-            EnsureComponent<DroneStatePublisher>(drone);
-            EnsureComponent<DroneObstacleSensorPublisher>(drone);
-            EnsureComponent<PackageActionBridge>(drone);
-
-            foreach (DeliveryDemo demo in root.GetComponents<DeliveryDemo>())
-                UnityEngine.Object.DestroyImmediate(demo);
-
-            var body = drone.GetComponent<Rigidbody>();
-            if (body != null)
-            {
-                body.isKinematic = true;
-                body.useGravity = false;
-            }
+            WarehouseRosSetup.ConfigureDrone(drone);
+            WarehouseRosSetup.DisableDeliveryDemos();
 
             Selection.activeGameObject = drone;
             EditorGUIUtility.PingObject(drone);
@@ -102,13 +87,6 @@ public static class WarehouseDroneAutoRunOnce
             AssetDatabase.ImportAsset(DonePath);
             AssetDatabase.Refresh();
         }
-    }
-
-    private static void EnsureComponent<T>(GameObject target)
-        where T : Component
-    {
-        if (target.GetComponent<T>() == null)
-            target.AddComponent<T>();
     }
 
     private static GameObject RequireObject(string name)
