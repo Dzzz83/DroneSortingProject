@@ -119,6 +119,8 @@ DroneSortingProject/
 
 │   │   ├── run_delivery_demo.sh
 
+│   │   ├── run_warehouse_ros_demo.sh
+
 │   │   ├── stop_demo.sh
 
 │   │   ├── watch_obstacles.sh
@@ -133,7 +135,9 @@ DroneSortingProject/
 
 │       ├── launch/
 
-│       │   └── drone_demo.launch
+│       │   ├── drone_demo.launch
+
+│       │   └── warehouse_demo.launch
 
 │       ├── scripts/
 
@@ -197,6 +201,8 @@ DroneSortingProject/
 
     │   │   ├── SampleScene.unity
 
+    │   │   ├── MainWarehouse.unity
+
     │   │   └── DroneGripperTest.unity
 
     │   └── Scripts/
@@ -209,7 +215,9 @@ DroneSortingProject/
 
     │       ├── DroneRosTopics.cs
 
-    │       └── PackageActionBridge.cs
+    │       ├── PackageActionBridge.cs
+
+    │       └── WarehouseRosRuntimeBootstrap.cs
 
     ├── Packages/
 
@@ -260,7 +268,7 @@ COMPLETE
 ```
 
 
-Pickup and drop-off positions are defined in `mission_config.py`, while the available mission states are defined in `mission_state.py`.
+Default pickup and drop-off positions are defined in `mission_config.py`, while launch parameters can override them for a specific scene. `warehouse_demo.launch` supplies the coordinates used by `MainWarehouse.unity`. The available mission states are defined in `mission_state.py`.
 
 
 The Mission Manager publishes the current destination through:
@@ -413,7 +421,7 @@ STOP
 #### ROS Launch File
 
 
-`drone_demo.launch` starts ROS-TCP-Endpoint, the Mission Manager, and the Motion Controller. Obstacle avoidance is enabled by default and can be disabled through the `enable_obstacle_avoidance` launch argument.
+`drone_demo.launch` starts ROS-TCP-Endpoint, the Mission Manager, and the Motion Controller and accepts configurable pickup/drop-off coordinates. `warehouse_demo.launch` reuses it with the `MainWarehouse` mission coordinates. Warehouse obstacle avoidance is disabled by default for the first integration test and can be enabled explicitly after sensor validation.
 
 
 #### Helper Scripts
@@ -444,7 +452,7 @@ Scripts inside `ROS1/scripts/` simplify common development and testing tasks suc
 
 `test_full_mission.sh` automatically verifies the ROS mission sequence from pickup to mission completion.
 
-`run_delivery_demo.sh` launches the current delivery demo, starts the ROS nodes with obstacle avoidance disabled, opens `SampleScene.unity`, and runs `delivery_demo_monitor.py` to verify pickup, drop-off, and mission completion.
+`run_delivery_demo.sh` keeps the smaller `SampleScene.unity` integration test. `run_warehouse_ros_demo.sh` syncs the current repository ROS package into the Catkin workspace, opens `MainWarehouse.unity`, starts the warehouse mission, and runs `delivery_demo_monitor.py`. Pass `false` for stage 1 without avoidance or `true` after warehouse sensor readings have been validated.
 
 
 ### Unity Components
@@ -557,7 +565,7 @@ The package-handling implementation is stored under `Unity/Assets/DroneDelivery/
 - `DeliveryRotor.cs` handles rotor animation
 
 
-`DroneGripperTest.unity` and `DeliveryDemo.cs` are standalone package-system test assets. The integrated delivery workflow uses `SampleScene.unity` and `PackageActionBridge.cs`.
+`DroneGripperTest.unity` and `DeliveryDemo.cs` remain standalone package-system test assets. The warehouse-integrated workflow uses `MainWarehouse.unity`, `PackageActionBridge.cs`, and the ROS command/state/sensor components. `WarehouseRosRuntimeBootstrap.cs` disables any serialized `DeliveryDemo` in `MainWarehouse` so Unity cannot bypass ROS movement control.
 
 
 #### DroneRosTopics.cs
@@ -575,7 +583,7 @@ Controls the camera used to observe the drone and obstacle course during the sim
 #### Unity Editor Tools
 
 
-The current editor helper is `DeliveryDemoSceneLauncher.cs`. It opens `SampleScene.unity` when the delivery demo is started from the Linux helper script, avoiding manual scene selection.
+`DeliveryDemoSceneLauncher.cs` can open either `SampleScene.unity` or `MainWarehouse.unity` from the Linux helper scripts. `WarehouseDroneIntegrator.cs` now attaches the ROS integration components to the warehouse drone and intentionally does not install `DeliveryDemo`.
 
 
 ## Current Data Flow
@@ -835,7 +843,21 @@ roslaunch drone_sorting drone_demo.launch enable_obstacle_avoidance:=false
 ```
 
 
-On the current Linux/Distrobox development setup, `./ROS1/scripts/run_delivery_demo.sh` performs this launch automatically and starts the delivery monitor.
+On the current Linux/Distrobox development setup, `run_delivery_demo.sh` runs the smaller SampleScene test. For the warehouse integration, use:
+
+```bash
+
+bash ROS1/scripts/run_warehouse_ros_demo.sh false
+
+```
+
+After the warehouse sensor values have been inspected with `ROS1/scripts/watch_obstacles.sh`, enable M3 obstacle avoidance with:
+
+```bash
+
+bash ROS1/scripts/run_warehouse_ros_demo.sh true
+
+```
 
 
 Then press **Play** in Unity.
@@ -980,7 +1002,11 @@ Currently working:
 
 - ROS package commands integrated with the Unity package system
 
-- End-to-end pickup, carry, drop-off, and mission completion
+- End-to-end pickup, carry, drop-off, and mission completion in the smaller integration scene
+
+- MainWarehouse ROS runtime integration path with Unity `DeliveryDemo` disabled
+
+- Warehouse-specific mission coordinates and staged avoidance launch
 
 - Mission-state monitoring
 
@@ -994,6 +1020,10 @@ Planned work:
 
 - Dynamic obstacle avoidance
 
-- Integrating obstacle avoidance into the package-delivery demo
+- Validate the ROS-controlled pickup/drop workflow in `MainWarehouse` at runtime
 
-- Final warehouse/environment integration and system polish
+- Validate warehouse sensor readings, then enable and tune obstacle avoidance
+
+- Dynamic obstacle avoidance
+
+- Final warehouse/environment polish
