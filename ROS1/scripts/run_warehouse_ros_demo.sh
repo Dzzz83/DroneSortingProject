@@ -6,6 +6,15 @@ PROJECT_ROOT="$HOME/DroneSortingProject"
 UNITY_PROJECT="$PROJECT_ROOT/Unity"
 ROS_WS="$HOME/drone_sorting_ros1_ws"
 
+ENABLE_AVOIDANCE="${1:-false}"
+
+if [[ "$ENABLE_AVOIDANCE" != "false" && "$ENABLE_AVOIDANCE" != "true" ]]; then
+    echo "Usage: bash ROS1/scripts/run_warehouse_ros_demo.sh [false|true]"
+    echo "  false = stage 1 ROS navigation + pickup/drop"
+    echo "  true  = stage 2 ROS obstacle avoidance enabled"
+    exit 1
+fi
+
 UNITY_EDITOR="$HOME/Unity/Hub/Editor/6000.6.0f1/Editor/unityhub-unity-editor-6000.6.0f1"
 
 UNITY_LOG="/tmp/drone-warehouse-unity.log"
@@ -34,6 +43,7 @@ trap cleanup EXIT INT TERM
 echo "========================================"
 echo " ROS-Controlled Warehouse Delivery Demo"
 echo "========================================"
+echo "Obstacle avoidance: $ENABLE_AVOIDANCE"
 
 echo
 echo "[1/5] Syncing repository ROS package..."
@@ -82,7 +92,7 @@ echo "[4/5] Starting ROS warehouse mission..."
 
 rm -f "$ROS_LOG"
 
-roslaunch     --screen     drone_sorting     warehouse_demo.launch     >"$ROS_LOG" 2>&1 &
+roslaunch     --screen     drone_sorting     warehouse_demo.launch     enable_obstacle_avoidance:="$ENABLE_AVOIDANCE"     >"$ROS_LOG" 2>&1 &
 
 ROS_PID=$!
 
@@ -121,7 +131,7 @@ echo
 echo "========================================"
 echo " Scene: MainWarehouse"
 echo " Control: ROS"
-echo " Avoidance: OFF (stage 1)"
+echo " Avoidance: $ENABLE_AVOIDANCE"
 echo
 echo " Press PLAY in Unity."
 echo
