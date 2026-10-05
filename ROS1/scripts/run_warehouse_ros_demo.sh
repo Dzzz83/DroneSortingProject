@@ -109,13 +109,24 @@ prepare_ros() {
 
 show_wsl_unity_instructions() {
     local wsl_ip
+    local windows_unity_path=""
+
     wsl_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+
+    if command -v wslpath >/dev/null 2>&1; then
+        windows_unity_path="$(wslpath -w "$UNITY_PROJECT" 2>/dev/null || true)"
+    fi
 
     echo "[INFO] WSL2 detected."
     echo "[INFO] Unity must run on Windows, so it will not be launched from this script."
     echo
     echo "       In Windows Unity Hub:"
-    echo "       1. Open the matching DroneSortingProject/Unity project."
+
+    if [[ -n "$windows_unity_path" ]]; then
+        echo "       1. Open: $windows_unity_path"
+    else
+        echo "       1. Open the matching DroneSortingProject/Unity project."
+    fi
     echo "       2. Open Assets/Scenes/MainWarehouse.unity."
     echo "       3. Set Active Input Handling to Both."
     echo "       4. In Robotics -> ROS Settings, use port 10000."
