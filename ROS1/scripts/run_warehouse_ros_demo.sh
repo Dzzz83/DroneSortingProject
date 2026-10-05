@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -eo pipefail
 
 PROJECT_ROOT="$HOME/DroneSortingProject"
 UNITY_PROJECT="$PROJECT_ROOT/Unity"
