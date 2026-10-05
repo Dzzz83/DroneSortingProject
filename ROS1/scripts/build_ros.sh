@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 PROJECT_ROOT="$HOME/DroneSortingProject"
 ROS_WS="$HOME/drone_sorting_ros1_ws"
 
-echo "Syncing repository ROS package into Catkin workspace..."
+if [[ ! -f /opt/ros/noetic/setup.bash ]]; then
+    echo "[INFO] Entering ros-noetic Distrobox..."
 
-distrobox enter --name ros-noetic -- bash -lc "
-set -e
+    exec distrobox enter --name ros-noetic -- bash -lc \
+        "cd \"$PROJECT_ROOT\" && bash ROS1/scripts/build_ros.sh"
+fi
+
 source /opt/ros/noetic/setup.bash
 
-rm -rf \"$ROS_WS/src/drone_sorting\"
-cp -r \"$PROJECT_ROOT/ROS1/src/drone_sorting\" \"$ROS_WS/src/drone_sorting\"
+bash "$PROJECT_ROOT/ROS1/scripts/sync_ros_workspace.sh"
 
-cd \"$ROS_WS\"
+cd "$ROS_WS"
 catkin_make
-"
 
-echo "ROS workspace synced and built successfully."
+echo "ROS workspace built successfully."
