@@ -15,6 +15,22 @@ if [[ "$ENABLE_AVOIDANCE" != "false" && "$ENABLE_AVOIDANCE" != "true" ]]; then
     exit 1
 fi
 
+# ROS Noetic is installed inside the ros-noetic Distrobox on the
+# CachyOS development machine. If this script is launched from the
+# host, transparently re-run it inside that container.
+if [[ ! -f /opt/ros/noetic/setup.bash ]]; then
+    if ! command -v distrobox >/dev/null 2>&1; then
+        echo "[FAIL] ROS Noetic is not available and distrobox was not found."
+        exit 1
+    fi
+
+    echo "[INFO] ROS Noetic is not installed on the host."
+    echo "[INFO] Re-entering this script inside distrobox: ros-noetic"
+
+    exec distrobox enter --name ros-noetic -- bash -lc \
+        "cd \"$PROJECT_ROOT\" && bash ROS1/scripts/run_warehouse_ros_demo.sh \"$ENABLE_AVOIDANCE\""
+fi
+
 UNITY_EDITOR="$HOME/Unity/Hub/Editor/6000.6.0f1/Editor/unityhub-unity-editor-6000.6.0f1"
 
 UNITY_LOG="/tmp/drone-warehouse-unity.log"
