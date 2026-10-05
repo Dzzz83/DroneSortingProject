@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -eo pipefail
 
 PROJECT_ROOT="$HOME/DroneSortingProject"
 ROS_WS="$HOME/drone_sorting_ros1_ws"
