@@ -61,7 +61,10 @@ public static class WarehouseDroneIntegrator
         if (surfaceRenderer != null)
             surfaceY = surfaceRenderer.bounds.max.y;
 
-        package.transform.position = new Vector3(pickupPoint.position.x, surfaceY + 0.31f, pickupPoint.position.z);
+        package.transform.position = new Vector3(
+            pickupPoint.position.x,
+            surfaceY + 0.31f,
+            pickupPoint.position.z);
         package.transform.rotation = Quaternion.identity;
 
         var handling = drone.GetComponent<PackageHandling>();
@@ -70,11 +73,23 @@ public static class WarehouseDroneIntegrator
         if (handling == null || deliveryPackage == null)
             throw new InvalidOperationException("Drone or package is missing its delivery runtime component.");
 
-        var demo = systemRoot.AddComponent<DeliveryDemo>();
-        demo.drone = handling;
-        demo.package = deliveryPackage;
-        demo.delivery = new Vector3(deliveryTarget.position.x, package.transform.position.y, deliveryTarget.position.z);
-        demo.speed = 4f;
+        // M4 integration: ROS is the only movement/mission controller.
+        EnsureComponent<DroneCommandSubscriber>(drone);
+        EnsureComponent<DroneStatePublisher>(drone);
+        EnsureComponent<DroneObstacleSensorPublisher>(drone);
+        EnsureComponent<PackageActionBridge>(drone);
+
+        var body = drone.GetComponent<Rigidbody>();
+        if (body != null)
+        {
+            body.isKinematic = true;
+            body.useGravity = false;
+        }
+
+        // Never add DeliveryDemo here. It directly moves the transform
+        // and would bypass the M3 motion controller.
+        foreach (DeliveryDemo demo in systemRoot.GetComponents<DeliveryDemo>())
+            UnityEngine.Object.DestroyImmediate(demo);
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
@@ -82,16 +97,28 @@ public static class WarehouseDroneIntegrator
 
         string reportPath = "Assets/DroneDelivery/WarehouseIntegration.txt";
         File.WriteAllText(reportPath,
-            "ATLAS 01 warehouse integration\n" +
+            "ATLAS 01 warehouse ROS integration\n" +
             "Scene: " + ScenePath + "\n" +
             "Drone position: " + Format(drone.transform.position) + "\n" +
             "Package position: " + Format(package.transform.position) + "\n" +
-            "Drone faces PickupPoint using local -Z.\n" +
-            "Automatic DeliveryDemo target: " + DeliveryTargetName + " at " + Format(demo.delivery) + "\n");
+            "Drop zone marker: " + DeliveryTargetName + " at " + Format(deliveryTarget.position) + "\n" +
+            "ROS components: command subscriber, state publisher, obstacle publisher, package bridge.\n" +
+            "DeliveryDemo: not installed; ROS is the movement controller.\n");
         AssetDatabase.ImportAsset(reportPath);
 
-        Debug.Log("WAREHOUSE_DRONE_INTEGRATION_COMPLETE drone=" + Format(drone.transform.position) +
-                  " package=" + Format(package.transform.position));
+        Debug.Log(
+            "WAREHOUSE_DRONE_INTEGRATION_COMPLETE drone=" +
+            Format(drone.transform.position) +
+            " package=" +
+            Format(package.transform.position) +
+            " control=ROS");
+    }
+
+    private static void EnsureComponent<T>(GameObject target)
+        where T : Component
+    {
+        if (target.GetComponent<T>() == null)
+            target.AddComponent<T>();
     }
 
     private static GameObject RequireObject(string name)
