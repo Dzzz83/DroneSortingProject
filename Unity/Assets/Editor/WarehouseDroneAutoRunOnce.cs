@@ -60,7 +60,7 @@ public static class WarehouseDroneAutoRunOnce
                 "Root: " + root.name + Environment.NewLine +
                 "Drone: " + Format(drone.transform.position) + Environment.NewLine +
                 "Control: ROS" + Environment.NewLine +
-                "DeliveryDemo: disabled/removed" + Environment.NewLine +
+                "DeliveryDemo: disabled" + Environment.NewLine +
                 "Automatic Play Mode: disabled; start ROS first." + Environment.NewLine;
 
             Debug.Log(
