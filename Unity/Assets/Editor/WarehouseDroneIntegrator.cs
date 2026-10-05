@@ -73,23 +73,8 @@ public static class WarehouseDroneIntegrator
         if (handling == null || deliveryPackage == null)
             throw new InvalidOperationException("Drone or package is missing its delivery runtime component.");
 
-        // M4 integration: ROS is the only movement/mission controller.
-        EnsureComponent<DroneCommandSubscriber>(drone);
-        EnsureComponent<DroneStatePublisher>(drone);
-        EnsureComponent<DroneObstacleSensorPublisher>(drone);
-        EnsureComponent<PackageActionBridge>(drone);
-
-        var body = drone.GetComponent<Rigidbody>();
-        if (body != null)
-        {
-            body.isKinematic = true;
-            body.useGravity = false;
-        }
-
-        // Never add DeliveryDemo here. It directly moves the transform
-        // and would bypass the M3 motion controller.
-        foreach (DeliveryDemo demo in systemRoot.GetComponents<DeliveryDemo>())
-            UnityEngine.Object.DestroyImmediate(demo);
+        WarehouseRosSetup.ConfigureDrone(drone);
+        WarehouseRosSetup.DisableDeliveryDemos();
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
@@ -112,13 +97,6 @@ public static class WarehouseDroneIntegrator
             " package=" +
             Format(package.transform.position) +
             " control=ROS");
-    }
-
-    private static void EnsureComponent<T>(GameObject target)
-        where T : Component
-    {
-        if (target.GetComponent<T>() == null)
-            target.AddComponent<T>();
     }
 
     private static GameObject RequireObject(string name)
