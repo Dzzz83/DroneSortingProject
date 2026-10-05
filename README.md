@@ -121,6 +121,8 @@ DroneSortingProject/
 
 │   │   ├── run_warehouse_ros_demo.sh
 
+│   │   ├── sync_ros_workspace.sh
+
 │   │   ├── stop_demo.sh
 
 │   │   ├── watch_obstacles.sh
@@ -216,6 +218,8 @@ DroneSortingProject/
     │       ├── DroneRosTopics.cs
 
     │       ├── PackageActionBridge.cs
+
+    │       ├── WarehouseRosSetup.cs
 
     │       └── WarehouseRosRuntimeBootstrap.cs
 
@@ -452,7 +456,7 @@ Scripts inside `ROS1/scripts/` simplify common development and testing tasks suc
 
 `test_full_mission.sh` automatically verifies the ROS mission sequence from pickup to mission completion.
 
-`run_delivery_demo.sh` keeps the smaller `SampleScene.unity` integration test. `run_warehouse_ros_demo.sh` syncs the current repository ROS package into the Catkin workspace, opens `MainWarehouse.unity`, starts the warehouse mission, and runs `delivery_demo_monitor.py`. Pass `false` for stage 1 without avoidance or `true` after warehouse sensor readings have been validated.
+`run_delivery_demo.sh` keeps the smaller `SampleScene.unity` integration test. `sync_ros_workspace.sh` keeps the Catkin workspace synchronized with the repository. `run_warehouse_ros_demo.sh` builds the current ROS package, opens `MainWarehouse.unity`, starts the warehouse mission, and runs `delivery_demo_monitor.py`. Pass `false` for stage 1 without avoidance or `true` after warehouse sensor readings have been validated.
 
 
 ### Unity Components
@@ -565,7 +569,7 @@ The package-handling implementation is stored under `Unity/Assets/DroneDelivery/
 - `DeliveryRotor.cs` handles rotor animation
 
 
-`DroneGripperTest.unity` and `DeliveryDemo.cs` remain standalone package-system test assets. The warehouse-integrated workflow uses `MainWarehouse.unity`, `PackageActionBridge.cs`, and the ROS command/state/sensor components. `WarehouseRosRuntimeBootstrap.cs` disables any serialized `DeliveryDemo` in `MainWarehouse` so Unity cannot bypass ROS movement control.
+`DroneGripperTest.unity` and `DeliveryDemo.cs` remain standalone package-system test assets. The warehouse-integrated workflow uses `MainWarehouse.unity`, `PackageActionBridge.cs`, and the ROS command/state/sensor components. `WarehouseRosSetup.cs` contains the shared warehouse ROS setup, while `WarehouseRosRuntimeBootstrap.cs` applies it when `MainWarehouse` enters Play Mode and disables any serialized `DeliveryDemo` so Unity cannot bypass ROS movement control.
 
 
 #### DroneRosTopics.cs
@@ -583,7 +587,7 @@ Controls the camera used to observe the drone and obstacle course during the sim
 #### Unity Editor Tools
 
 
-`DeliveryDemoSceneLauncher.cs` can open either `SampleScene.unity` or `MainWarehouse.unity` from the Linux helper scripts. `WarehouseDroneIntegrator.cs` now attaches the ROS integration components to the warehouse drone and intentionally does not install `DeliveryDemo`.
+`DeliveryDemoSceneLauncher.cs` can open either `SampleScene.unity` or `MainWarehouse.unity` from the Linux helper scripts. `WarehouseDroneIntegrator.cs` places the M2 drone/package system in the warehouse and delegates ROS component setup to `WarehouseRosSetup.cs`.
 
 
 ## Current Data Flow
@@ -1004,7 +1008,7 @@ Currently working:
 
 - End-to-end pickup, carry, drop-off, and mission completion in the smaller integration scene
 
-- MainWarehouse ROS runtime integration path with Unity `DeliveryDemo` disabled
+- MainWarehouse ROS runtime integration validated end-to-end with Unity `DeliveryDemo` disabled
 
 - Warehouse-specific mission coordinates and staged avoidance launch
 
@@ -1016,13 +1020,9 @@ Currently working:
 Planned work:
 
 
-- Improved sensing
-
-- Dynamic obstacle avoidance
-
-- Validate the ROS-controlled pickup/drop workflow in `MainWarehouse` at runtime
-
 - Validate warehouse sensor readings, then enable and tune obstacle avoidance
+
+- Improved sensing
 
 - Dynamic obstacle avoidance
 
