@@ -2,10 +2,20 @@
 
 set -e
 
-distrobox enter --name ros-noetic -- bash -lc '
-source /opt/ros/noetic/setup.bash
-cd "$HOME/drone_sorting_ros1_ws"
-catkin_make
-'
+PROJECT_ROOT="$HOME/DroneSortingProject"
+ROS_WS="$HOME/drone_sorting_ros1_ws"
 
-echo "ROS workspace built successfully."
+echo "Syncing repository ROS package into Catkin workspace..."
+
+distrobox enter --name ros-noetic -- bash -lc "
+set -e
+source /opt/ros/noetic/setup.bash
+
+rm -rf \"$ROS_WS/src/drone_sorting\"
+cp -r \"$PROJECT_ROOT/ROS1/src/drone_sorting\" \"$ROS_WS/src/drone_sorting\"
+
+cd \"$ROS_WS\"
+catkin_make
+"
+
+echo "ROS workspace synced and built successfully."
