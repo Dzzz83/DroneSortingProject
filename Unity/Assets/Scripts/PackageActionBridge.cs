@@ -3,9 +3,12 @@ using DroneDelivery;
 using RosMessageTypes.Std;
 using Unity.Robotics.ROSTCPConnector;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class PackageActionBridge : MonoBehaviour
 {
+    private const string AutoInstallScene = "SampleScene";
+
     private ROSConnection ros;
     private PackageHandling packageHandling;
 
@@ -44,27 +47,19 @@ public class PackageActionBridge : MonoBehaviour
         );
     }
 
-    private void OnPackageAction(
-        StringMsg message
-    )
+    private void OnPackageAction(StringMsg message)
     {
         string action =
             message.data.Trim().ToUpperInvariant();
 
-        // M3 clears the latched command after
-        // receiving confirmation.
+        // M3 clears the latched command after confirmation.
         if (string.IsNullOrEmpty(action))
         {
             lastAction = "";
             return;
         }
 
-        if (processingAction)
-        {
-            return;
-        }
-
-        if (action == lastAction)
+        if (processingAction || action == lastAction)
         {
             return;
         }
@@ -78,9 +73,7 @@ public class PackageActionBridge : MonoBehaviour
 
         if (action == "PICKUP")
         {
-            StartCoroutine(
-                HandlePickup()
-            );
+            StartCoroutine(HandlePickup());
         }
         else if (action == "DROP")
         {
@@ -138,10 +131,7 @@ public class PackageActionBridge : MonoBehaviour
             "Physical pickup completed."
         );
 
-        PublishStatus(
-            "PICKUP_DONE"
-        );
-
+        PublishStatus("PICKUP_DONE");
         processingAction = false;
     }
 
@@ -183,16 +173,11 @@ public class PackageActionBridge : MonoBehaviour
             "Physical drop completed."
         );
 
-        PublishStatus(
-            "DROP_DONE"
-        );
-
+        PublishStatus("DROP_DONE");
         processingAction = false;
     }
 
-    private void PublishStatus(
-        string status
-    )
+    private void PublishStatus(string status)
     {
         ros.Publish(
             DroneRosTopics.PackageActionStatus,
@@ -208,30 +193,33 @@ public class PackageActionBridge : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(
         RuntimeInitializeLoadType.AfterSceneLoad
     )]
-    private static void InstallAutomatically()
+    private static void InstallForSampleScene()
     {
+        if (
+            SceneManager.GetActiveScene().name
+            != AutoInstallScene
+        )
+        {
+            return;
+        }
+
         PackageHandling packageHandling =
             Object.FindFirstObjectByType<PackageHandling>();
 
-        // Scenes that do not contain the delivery drone
-        // do not need this bridge.
         if (packageHandling == null)
         {
+            Debug.LogError(
+                "PackageActionBridge: delivery drone not found."
+            );
             return;
         }
 
         GameObject drone =
             packageHandling.gameObject;
 
-        if (
-            drone.GetComponent<
-                PackageActionBridge
-            >() == null
-        )
+        if (drone.GetComponent<PackageActionBridge>() == null)
         {
-            drone.AddComponent<
-                PackageActionBridge
-            >();
+            drone.AddComponent<PackageActionBridge>();
         }
     }
 }
