@@ -22,11 +22,11 @@
         <arg name="pickup_y" value="25.10" />
         <arg name="pickup_z" value="1.39" />
 
-        <!-- SortingZoneA is centered near Unity (28, 2, 55). -->
-        <!-- Keep package mount near zone height for release. -->
+        <!-- Existing successful DeliveryDemo releases at Unity (28, 1, 55). -->
+        <!-- Package mount is 0.95 m below the drone root. -->
         <arg name="dropoff_x" value="28.00" />
         <arg name="dropoff_y" value="55.00" />
-        <arg name="dropoff_z" value="2.95" />
+        <arg name="dropoff_z" value="1.95" />
 
         <!-- Tighter than PackageHandling pickupRadius = 0.22 m. -->
         <arg name="arrival_tolerance" value="0.05" />
