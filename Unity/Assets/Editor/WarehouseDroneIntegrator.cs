@@ -88,7 +88,7 @@ public static class WarehouseDroneIntegrator
             "Package position: " + Format(package.transform.position) + "\n" +
             "Drop zone marker: " + DeliveryTargetName + " at " + Format(deliveryTarget.position) + "\n" +
             "ROS components: command subscriber, state publisher, obstacle publisher, package bridge.\n" +
-            "DeliveryDemo: not installed; ROS is the movement controller.\n");
+            "DeliveryDemo: disabled; ROS is the movement controller.\n");
         AssetDatabase.ImportAsset(reportPath);
 
         Debug.Log(
