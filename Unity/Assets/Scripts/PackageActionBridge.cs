@@ -6,7 +6,6 @@ using UnityEngine;
 
 public class PackageActionBridge : MonoBehaviour
 {
-
     private ROSConnection ros;
     private PackageHandling packageHandling;
 
@@ -22,7 +21,7 @@ public class PackageActionBridge : MonoBehaviour
         {
             Debug.LogError(
                 "PackageActionBridge: PackageHandling " +
-                "is missing from Drone."
+                "is missing from this drone."
             );
 
             enabled = false;
@@ -119,8 +118,6 @@ public class PackageActionBridge : MonoBehaviour
             yield break;
         }
 
-        // PickUpPackage() starts an asynchronous
-        // gripper operation. Wait for it to finish.
         yield return new WaitUntil(
             () => !packageHandling.IsBusy
         );
@@ -213,18 +210,18 @@ public class PackageActionBridge : MonoBehaviour
     )]
     private static void InstallAutomatically()
     {
-        GameObject drone =
-            GameObject.Find("Drone");
+        PackageHandling packageHandling =
+            Object.FindFirstObjectByType<PackageHandling>();
 
-        if (drone == null)
+        // Scenes that do not contain the delivery drone
+        // do not need this bridge.
+        if (packageHandling == null)
         {
-            Debug.LogError(
-                "PackageActionBridge: " +
-                "Drone not found."
-            );
-
             return;
         }
+
+        GameObject drone =
+            packageHandling.gameObject;
 
         if (
             drone.GetComponent<
