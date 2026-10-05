@@ -1,0 +1,6 @@
+ATLAS 01 warehouse integration
+Scene: Assets/Scenes/MainWarehouse.unity
+Drone position: (34, 2, 10)
+Package position: (34, 0.43, 25)
+Drone faces PickupPoint using local -Z.
+Automatic DeliveryDemo was intentionally not added to MainWarehouse.

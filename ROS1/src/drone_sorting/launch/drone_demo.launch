@@ -1,28 +1,36 @@
 <launch>
-    <!--
-        Obstacle avoidance stays enabled by default.
-        Specific demos can override this argument.
-    -->
-    <arg
-        name="enable_obstacle_avoidance"
-        default="true"
-    />
+    <arg name="enable_obstacle_avoidance" default="true" />
 
-    <!-- ROS-TCP bridge for Unity -->
+    <arg name="pickup_x" default="18.0" />
+    <arg name="pickup_y" default="0.0" />
+    <arg name="pickup_z" default="2.0" />
+
+    <arg name="dropoff_x" default="0.0" />
+    <arg name="dropoff_y" default="0.0" />
+    <arg name="dropoff_z" default="2.0" />
+
+    <arg name="arrival_tolerance" default="0.25" />
+
     <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
-        <arg name="tcp_ip" value="127.0.0.1" />
+        <arg name="tcp_ip" value="0.0.0.0" />
         <arg name="tcp_port" value="10000" />
     </include>
 
-    <!-- High-level package delivery mission -->
     <node
         pkg="drone_sorting"
         type="mission_manager_node.py"
         name="mission_manager"
         output="screen"
-    />
+    >
+        <param name="pickup_x" value="$(arg pickup_x)" />
+        <param name="pickup_y" value="$(arg pickup_y)" />
+        <param name="pickup_z" value="$(arg pickup_z)" />
+        <param name="dropoff_x" value="$(arg dropoff_x)" />
+        <param name="dropoff_y" value="$(arg dropoff_y)" />
+        <param name="dropoff_z" value="$(arg dropoff_z)" />
+        <param name="arrival_tolerance" value="$(arg arrival_tolerance)" />
+    </node>
 
-    <!-- ROS movement controller -->
     <node
         pkg="drone_sorting"
         type="motion_controller_node.py"

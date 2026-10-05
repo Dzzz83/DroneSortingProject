@@ -5,7 +5,6 @@ from geometry_msgs.msg import Point, Vector3
 from std_msgs.msg import String
 
 from drone_sorting.interfaces import ros_topics
-
 from drone_sorting.mission.mission_config import MissionConfig
 from drone_sorting.mission.mission_state import MissionState
 
@@ -16,13 +15,24 @@ class MissionManager:
     def __init__(self):
         self.state = MissionState.IDLE
 
-        self.pickup_position = MissionConfig.PICKUP_POSITION
-        self.dropoff_position = MissionConfig.DROPOFF_POSITION
+        self.pickup_position = self._load_position(
+            "pickup",
+            MissionConfig.PICKUP_POSITION,
+        )
+        self.dropoff_position = self._load_position(
+            "dropoff",
+            MissionConfig.DROPOFF_POSITION,
+        )
 
         self.current_position = None
         self.current_target = None
 
-        self.arrival_tolerance = MissionConfig.ARRIVAL_TOLERANCE
+        self.arrival_tolerance = float(
+            rospy.get_param(
+                "~arrival_tolerance",
+                MissionConfig.ARRIVAL_TOLERANCE,
+            )
+        )
 
         self.target_publisher = rospy.Publisher(
             ros_topics.TARGET_POSITION,
@@ -69,7 +79,19 @@ class MissionManager:
         )
 
     def run(self):
-        rospy.loginfo("Mission Manager started")
+        rospy.loginfo(
+            "Mission Manager started | "
+            "pickup=(%.2f, %.2f, %.2f) "
+            "dropoff=(%.2f, %.2f, %.2f) "
+            "tolerance=%.2f",
+            self.pickup_position.x,
+            self.pickup_position.y,
+            self.pickup_position.z,
+            self.dropoff_position.x,
+            self.dropoff_position.y,
+            self.dropoff_position.z,
+            self.arrival_tolerance,
+        )
 
         rospy.sleep(0.5)
 
@@ -158,12 +180,24 @@ class MissionManager:
         )
 
     def _has_reached_target(self):
-        if self.current_position is None or self.current_target is None:
+        if (
+            self.current_position is None
+            or self.current_target is None
+        ):
             return False
 
-        dx = self.current_target.x - self.current_position.x
-        dy = self.current_target.y - self.current_position.y
-        dz = self.current_target.z - self.current_position.z
+        dx = (
+            self.current_target.x
+            - self.current_position.x
+        )
+        dy = (
+            self.current_target.y
+            - self.current_position.y
+        )
+        dz = (
+            self.current_target.z
+            - self.current_position.z
+        )
 
         distance = math.sqrt(
             dx * dx
@@ -208,17 +242,51 @@ class MissionManager:
         )
 
     @staticmethod
+    def _load_position(prefix, default_position):
+        return Point(
+            x=float(
+                rospy.get_param(
+                    f"~{prefix}_x",
+                    default_position.x,
+                )
+            ),
+            y=float(
+                rospy.get_param(
+                    f"~{prefix}_y",
+                    default_position.y,
+                )
+            ),
+            z=float(
+                rospy.get_param(
+                    f"~{prefix}_z",
+                    default_position.z,
+                )
+            ),
+        )
+
+    @staticmethod
     def _calculate_heading(current_position, target):
         if current_position is None:
-            return Vector3(x=1.0, y=0.0, z=0.0)
+            return Vector3(
+                x=1.0,
+                y=0.0,
+                z=0.0,
+            )
 
         dx = target.x - current_position.x
         dy = target.y - current_position.y
 
-        length = math.sqrt(dx * dx + dy * dy)
+        length = math.sqrt(
+            dx * dx
+            + dy * dy
+        )
 
         if length == 0.0:
-            return Vector3(x=1.0, y=0.0, z=0.0)
+            return Vector3(
+                x=1.0,
+                y=0.0,
+                z=0.0,
+            )
 
         return Vector3(
             x=dx / length,
