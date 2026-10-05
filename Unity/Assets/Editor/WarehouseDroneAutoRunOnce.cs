@@ -14,10 +14,6 @@ public static class WarehouseDroneAutoRunOnce
     private const string ScenePath = "Assets/Scenes/MainWarehouse.unity";
     private const string RootName = "Member2_DroneSystem";
     private const string DroneName = "DeliveryDrone_ATLAS01";
-    private const string PackageName = "DeliveryPackage_Pickup";
-    private const string DeliveryTargetName = "SortingZoneA";
-    private const float DemoSpeed = 4f;
-    private const bool AutoPlayAfterSetup = true;
 
     static WarehouseDroneAutoRunOnce()
     {
@@ -47,36 +43,28 @@ public static class WarehouseDroneAutoRunOnce
             }
 
             GameObject drone = RequireObject(DroneName);
-            GameObject package = RequireObject(PackageName);
             GameObject root = RequireObject(RootName);
-            GameObject deliveryTarget = RequireObject(DeliveryTargetName);
 
-            PackageHandling handling = drone.GetComponent<PackageHandling>();
-            DeliveryPackage deliveryPackage = package.GetComponent<DeliveryPackage>();
-            if (handling == null || deliveryPackage == null)
-                throw new InvalidOperationException("Drone or package is missing its delivery runtime component.");
+            if (drone.GetComponent<PackageHandling>() == null)
+                throw new InvalidOperationException("Drone is missing PackageHandling.");
 
-            DeliveryDemo demo = root.GetComponent<DeliveryDemo>();
-            if (demo == null)
-                demo = root.AddComponent<DeliveryDemo>();
+            EnsureComponent<DroneCommandSubscriber>(drone);
+            EnsureComponent<DroneStatePublisher>(drone);
+            EnsureComponent<DroneObstacleSensorPublisher>(drone);
+            EnsureComponent<PackageActionBridge>(drone);
 
-            demo.drone = handling;
-            demo.package = deliveryPackage;
-            demo.delivery = new Vector3(
-                deliveryTarget.transform.position.x,
-                package.transform.position.y,
-                deliveryTarget.transform.position.z);
-            demo.speed = DemoSpeed;
-            demo.enabled = true;
+            foreach (DeliveryDemo demo in root.GetComponents<DeliveryDemo>())
+                UnityEngine.Object.DestroyImmediate(demo);
+
+            var body = drone.GetComponent<Rigidbody>();
+            if (body != null)
+            {
+                body.isKinematic = true;
+                body.useGravity = false;
+            }
 
             Selection.activeGameObject = drone;
             EditorGUIUtility.PingObject(drone);
-            SceneView sceneView = SceneView.lastActiveSceneView;
-            if (sceneView != null)
-            {
-                sceneView.FrameSelected();
-                sceneView.Repaint();
-            }
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
@@ -87,13 +75,13 @@ public static class WarehouseDroneAutoRunOnce
                 "Scene: " + ScenePath + Environment.NewLine +
                 "Root: " + root.name + Environment.NewLine +
                 "Drone: " + Format(drone.transform.position) + Environment.NewLine +
-                "Package: " + Format(package.transform.position) + Environment.NewLine +
-                "Delivery target: " + DeliveryTargetName + " " + Format(demo.delivery) + Environment.NewLine +
-                "Automatic mission: enabled" + Environment.NewLine;
+                "Control: ROS" + Environment.NewLine +
+                "DeliveryDemo: disabled/removed" + Environment.NewLine +
+                "Automatic Play Mode: disabled; start ROS first." + Environment.NewLine;
 
-            Debug.Log("WAREHOUSE_DRONE_AUTORUN_COMPLETE " + details.Replace(Environment.NewLine, " "));
-            if (AutoPlayAfterSetup)
-                EditorApplication.delayCall += EnterPlayMode;
+            Debug.Log(
+                "WAREHOUSE_ROS_SETUP_COMPLETE " +
+                details.Replace(Environment.NewLine, " "));
         }
         catch (Exception exception)
         {
@@ -103,9 +91,11 @@ public static class WarehouseDroneAutoRunOnce
         finally
         {
             string report =
-                "Warehouse drone auto-run result" + Environment.NewLine +
+                "Warehouse ROS integration result" + Environment.NewLine +
                 "Status: " + status + Environment.NewLine +
-                "Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + Environment.NewLine +
+                "Time: " + DateTime.Now.ToString(
+                    "yyyy-MM-dd HH:mm:ss",
+                    CultureInfo.InvariantCulture) + Environment.NewLine +
                 details;
 
             File.WriteAllText(ToAbsolutePath(DonePath), report);
@@ -114,18 +104,19 @@ public static class WarehouseDroneAutoRunOnce
         }
     }
 
+    private static void EnsureComponent<T>(GameObject target)
+        where T : Component
+    {
+        if (target.GetComponent<T>() == null)
+            target.AddComponent<T>();
+    }
+
     private static GameObject RequireObject(string name)
     {
         GameObject value = GameObject.Find(name);
         if (value == null)
             throw new InvalidOperationException("Required object not found: " + name);
         return value;
-    }
-
-    private static void EnterPlayMode()
-    {
-        if (!EditorApplication.isPlayingOrWillChangePlaymode)
-            EditorApplication.isPlaying = true;
     }
 
     private static string ToAbsolutePath(string assetPath)
