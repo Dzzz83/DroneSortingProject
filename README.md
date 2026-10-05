@@ -187,7 +187,7 @@ Warehouse obstacle avoidance is disabled by default until the warehouse sensor r
 | `sync_ros_workspace.sh` | Copies the repository ROS package into the Catkin workspace |
 | `build_ros.sh` | Syncs and builds the ROS workspace |
 | `run_delivery_demo.sh` | Runs the smaller `SampleScene` integration demo |
-| `run_warehouse_ros_demo.sh` | Runs the complete `MainWarehouse` mission |
+| `run_warehouse_ros_demo.sh` | Runs the complete `MainWarehouse` mission on Linux or WSL2 |
 | `watch_obstacles.sh` | Displays Unity obstacle sensor readings |
 | `stop_demo.sh` | Stops the running ROS demo |
 | `test_mission.sh` / `test_full_mission.sh` | Mission testing helpers |
@@ -389,14 +389,15 @@ cd ~/drone_sorting_ros1_ws/src
 git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
 ```
 
-Build the project ROS package:
+The helper scripts detect the repository location automatically, so the project does not need to be stored at `~/DroneSortingProject`.
+
+Build the ROS workspace:
 
 ```bash
-cd ~/DroneSortingProject
 bash ROS1/scripts/build_ros.sh
 ```
 
-Open the repository's `Unity` folder in Unity Hub and configure:
+Configure Unity:
 
 ```text
 Robotics → ROS Settings
@@ -404,11 +405,7 @@ Robotics → ROS Settings
 Protocol: ROS1
 IP:       127.0.0.1
 Port:     10000
-```
 
-For the warehouse asset's legacy camera controller, set:
-
-```text
 Edit → Project Settings → Player
 Active Input Handling: Both
 ```
@@ -419,7 +416,9 @@ Run the warehouse mission without obstacle avoidance:
 bash ROS1/scripts/run_warehouse_ros_demo.sh false
 ```
 
-When Unity finishes loading `MainWarehouse`, press **Play**.
+On the current CachyOS/Distrobox setup, the runner opens `MainWarehouse` in the host Unity Editor automatically. On native Linux, it opens Unity automatically when the configured `UNITY_EDITOR` path exists; otherwise it prints the project path to open manually.
+
+When Unity is ready, press **Play**.
 
 After validating warehouse sensor readings, enable obstacle avoidance with:
 
@@ -429,26 +428,56 @@ bash ROS1/scripts/run_warehouse_ros_demo.sh true
 
 ### Windows
 
-Run Unity normally on Windows and run ROS 1 Noetic inside **WSL2 Ubuntu 20.04**.
+Run Unity on Windows and ROS 1 Noetic inside **WSL2 Ubuntu 20.04**.
 
-Inside WSL, clone the repository, create `~/drone_sorting_ros1_ws/src`, install ROS-TCP-Endpoint, and build the ROS package as described in the Linux section.
+For the simplest setup, keep the repository on a Windows drive so both Windows Unity and WSL2 use the same checkout. For example:
 
-Open the repository's `Unity` folder with Unity Hub on Windows.
+```text
+Windows:
+C:\Users\<you>\Documents\DroneSortingProject
 
-Configure Unity ROS Settings:
+WSL2:
+ /mnt/c/Users/<you>/Documents/DroneSortingProject
+```
+
+Inside WSL2, create the Catkin workspace and install ROS-TCP-Endpoint:
+
+```bash
+mkdir -p ~/drone_sorting_ros1_ws/src
+cd ~/drone_sorting_ros1_ws/src
+git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
+```
+
+Then enter the repository from WSL2 and run the same warehouse command used on Linux:
+
+```bash
+cd /mnt/c/Users/<you>/Documents/DroneSortingProject
+bash ROS1/scripts/run_warehouse_ros_demo.sh false
+```
+
+The runner detects WSL2 automatically. It builds and launches ROS inside WSL2, but does **not** try to launch the Linux Unity Editor. Instead, it prints the Windows Unity project path and connection instructions.
+
+In Windows Unity Hub:
+
+1. Open the repository's `Unity` folder.
+2. Open `Assets/Scenes/MainWarehouse.unity`.
+3. Set `Active Input Handling` to `Both`.
+4. Configure ROS Settings:
 
 ```text
 Protocol: ROS1
 Port:     10000
 ```
 
-Try `127.0.0.1` first. If Unity cannot reach ROS through WSL2, run:
+Try `127.0.0.1` first. If it does not connect, use the WSL2 IP printed by the runner.
+
+Then press **Play**.
+
+Obstacle avoidance is enabled with the same command:
 
 ```bash
-hostname -I
+bash ROS1/scripts/run_warehouse_ros_demo.sh true
 ```
-
-and use the WSL2 IP address in Unity's ROS Settings.
 
 ## Current Status
 

@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="${PROJECT_ROOT:-$HOME/DroneSortingProject}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 ROS_WS="${ROS_WS:-$HOME/drone_sorting_ros1_ws}"
 
 SOURCE_PACKAGE="$PROJECT_ROOT/ROS1/src/drone_sorting"
