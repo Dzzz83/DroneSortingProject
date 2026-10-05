@@ -1,1029 +1,474 @@
 # Drone Sorting Project
 
+Unity + ROS 1 simulation for an autonomous drone that transports lightweight packages between sorting zones in a warehouse.
 
-Unity + ROS 1 simulation for an autonomous drone that transports lightweight packages between sorting zones while avoiding obstacles.
-
-
-ROS acts as the main control system. Unity provides the simulated warehouse environment, drone movement, position feedback, obstacle sensor data, and physical package handling.
-
+ROS is the main control system. Unity simulates the warehouse, drone, sensors, package handling, and rendering.
 
 ## Table of Contents
 
-
-- [Drone Sorting Project](#drone-sorting-project)
-
-  - [Table of Contents](#table-of-contents)
-
-  - [Project Overview](#project-overview)
-
-  - [Project Structure](#project-structure)
-
-  - [Main Components](#main-components)
-
-    - [ROS Components](#ros-components)
-
-      - [Mission Manager](#mission-manager)
-
-      - [Motion Controller](#motion-controller)
-
-      - [Obstacle Avoidance Planner](#obstacle-avoidance-planner)
-
-      - [ROS Launch File](#ros-launch-file)
-
-      - [Helper Scripts](#helper-scripts)
-
-    - [Unity Components](#unity-components)
-
-      - [DroneCommandSubscriber.cs](#dronecommandsubscribercs)
-
-      - [DroneStatePublisher.cs](#dronestatepublishercs)
-
-      - [DroneObstacleSensorPublisher.cs](#droneobstaclesensorpublishercs)
-
-      - [PackageActionBridge.cs](#packageactionbridgecs)
-
-      - [Drone Delivery Package System](#drone-delivery-package-system)
-
-      - [DroneRosTopics.cs](#dronerostopicscs)
-
-      - [ObstacleCourseCamera.cs](#obstaclecoursecameracs)
-
-      - [Unity Editor Tools](#unity-editor-tools)
-
-  - [Current Data Flow](#current-data-flow)
-
-  - [Workflow](#workflow)
-
-  - [Installation](#installation)
-
-    - [Requirements](#requirements)
-
-    - [Linux](#linux)
-
-    - [Windows](#windows)
-
-  - [Current Status](#current-status)
-
+- [Project Overview](#project-overview)
+- [Project Structure](#project-structure)
+- [Main Components](#main-components)
+  - [ROS Components](#ros-components)
+  - [Unity Components](#unity-components)
+- [Current Data Flow](#current-data-flow)
+- [Workflow](#workflow)
+- [Installation](#installation)
+  - [Requirements](#requirements)
+  - [Linux](#linux)
+  - [Windows](#windows)
+- [Current Status](#current-status)
 
 ## Project Overview
 
-
-The project separates simulation from decision-making.
-
-
-**Unity** is responsible for:
-
-
-- Simulating the warehouse and obstacles
-
-- Moving the drone
-
-- Measuring obstacle distances
-
-- Reporting the drone's current position
-
-- Handling physical package pickup, attachment, transport, and drop-off
-
+The project separates **decision-making** from **simulation**.
 
 **ROS 1** is responsible for:
 
+- Managing mission states and pickup/drop-off targets
+- Processing drone position and obstacle sensor data
+- Calculating movement commands
+- Deciding obstacle-avoidance actions
+- Requesting package pickup and drop
 
-- Managing the delivery mission and mission states
+**Unity** is responsible for:
 
-- Selecting pickup and drop-off targets
+- Simulating the warehouse, drone, obstacles, and package
+- Applying movement commands received from ROS
+- Reporting the drone's current position
+- Measuring obstacle distances using Unity physics
+- Simulating the gripper and physical package attachment/release
+- Rendering the simulation
 
-- Processing position and sensor data
-
-- Requesting package pickup and drop actions
-
-- Deciding how the drone should avoid obstacles
-
-- Calculating the next movement command
-
-
-Communication between ROS and Unity is handled through the Unity ROS-TCP-Connector and ROS-TCP-Endpoint.
-
+ROS and Unity communicate through Unity ROS-TCP-Connector and ROS-TCP-Endpoint.
 
 ## Project Structure
 
-
 ```text
-
 DroneSortingProject/
-
 ├── ROS1/
-
 │   ├── scripts/
-
 │   │   ├── build_ros.sh
-
 │   │   ├── run_delivery_demo.sh
-
 │   │   ├── run_warehouse_ros_demo.sh
-
 │   │   ├── sync_ros_workspace.sh
-
 │   │   ├── stop_demo.sh
-
 │   │   ├── watch_obstacles.sh
-
 │   │   ├── test_mission.sh
-
 │   │   └── test_full_mission.sh
-
 │   │
-
 │   └── src/drone_sorting/
-
 │       ├── launch/
-
 │       │   ├── drone_demo.launch
-
 │       │   └── warehouse_demo.launch
-
 │       ├── scripts/
-
 │       │   ├── delivery_demo_monitor.py
-
 │       │   ├── mission_manager_node.py
-
 │       │   └── motion_controller_node.py
-
 │       └── src/drone_sorting/
-
-│           ├── mission/
-
-│           │   ├── mission_manager.py
-
-│           │   ├── mission_config.py
-
-│           │   └── mission_state.py
-
 │           ├── control/
-
+│           │   └── motion_controller.py
 │           ├── interfaces/
-
 │           │   └── ros_topics.py
-
-│           ├── planning/
-
-│           └── perception/
-
+│           ├── mission/
+│           │   ├── mission_config.py
+│           │   ├── mission_manager.py
+│           │   └── mission_state.py
+│           └── planning/
+│               └── obstacle_avoidance.py
 │
-
 └── Unity/
-
     ├── Assets/
-
-    │   ├── DroneDelivery/
-
-    │   │   └── Runtime/
-
-    │   │       ├── DeliveryDemo.cs
-
-    │   │       ├── DeliveryPackage.cs
-
-    │   │       ├── DeliveryRotor.cs
-
-    │   │       ├── GripperController.cs
-
-    │   │       └── PackageHandling.cs
-
+    │   ├── DroneDelivery/Runtime/
+    │   │   ├── DeliveryDemo.cs
+    │   │   ├── DeliveryPackage.cs
+    │   │   ├── DeliveryRotor.cs
+    │   │   ├── GripperController.cs
+    │   │   └── PackageHandling.cs
     │   ├── Editor/
-
-    │   │   └── DeliveryDemoSceneLauncher.cs
-
+    │   │   ├── DeliveryDemoSceneLauncher.cs
+    │   │   ├── WarehouseDroneAutoRunOnce.cs
+    │   │   └── WarehouseDroneIntegrator.cs
     │   ├── Prefabs/
-
     │   │   ├── Drone.prefab
-
     │   │   └── Package.prefab
-
     │   ├── Scenes/
-
     │   │   ├── SampleScene.unity
-
     │   │   ├── MainWarehouse.unity
-
     │   │   └── DroneGripperTest.unity
-
     │   └── Scripts/
-
     │       ├── DroneCommandSubscriber.cs
-
-    │       ├── DroneStatePublisher.cs
-
     │       ├── DroneObstacleSensorPublisher.cs
-
     │       ├── DroneRosTopics.cs
-
+    │       ├── DroneStatePublisher.cs
     │       ├── PackageActionBridge.cs
-
-    │       ├── WarehouseRosSetup.cs
-
-    │       └── WarehouseRosRuntimeBootstrap.cs
-
+    │       ├── WarehouseRosRuntimeBootstrap.cs
+    │       └── WarehouseRosSetup.cs
     ├── Packages/
-
     └── ProjectSettings/
-
 ```
-
 
 ## Main Components
 
-
 ### ROS Components
-
 
 #### Mission Manager
 
-
-The Mission Manager controls the high-level package delivery mission. It decides which stage of the mission is currently active and selects the corresponding destination.
-
-
-The current mission sequence is:
-
+`mission_manager.py` controls the high-level delivery mission:
 
 ```text
-
 IDLE
-
   ↓
-
 GO_TO_PICKUP
-
   ↓
-
 WAIT_FOR_PICKUP
-
   ↓
-
 GO_TO_DROPOFF
-
   ↓
-
 WAIT_FOR_DROP
-
   ↓
-
 COMPLETE
-
 ```
 
+It selects the active target, detects arrival using Unity position feedback, requests `PICKUP` or `DROP`, and waits for Unity to confirm completion.
 
-Default pickup and drop-off positions are defined in `mission_config.py`, while launch parameters can override them for a specific scene. `warehouse_demo.launch` supplies the coordinates used by `MainWarehouse.unity`. The available mission states are defined in `mission_state.py`.
-
-
-The Mission Manager publishes the current destination through:
-
-
-```text
-
-/drone/target_position
-
-```
-
-
-The Motion Controller uses this position as the destination the drone should move toward.
-
-
-When the pickup or drop-off position is reached, the Mission Manager publishes a package command through:
-
-
-```text
-
-/drone/package_action
-
-```
-
-
-Possible commands are:
-
-
-```text
-
-PICKUP
-
-DROP
-
-```
-
-
-The mission then waits for confirmation through:
-
-
-```text
-
-/drone/package_action_status
-
-```
-
-
-Expected confirmations are:
-
-
-```text
-
-PICKUP_DONE
-
-DROP_DONE
-
-```
-
-
-The current mission state is also published through:
-
-
-```text
-
-/drone/mission_state
-
-```
-
-
-This allows the mission progress to be monitored and tested independently.
-
+`mission_config.py` contains default mission values. Scene-specific launch files can override pickup/drop-off coordinates and arrival tolerance.
 
 #### Motion Controller
 
+`motion_controller.py` is the main ROS movement controller. It receives:
 
-The Motion Controller is the main ROS control node.
+- Mission target position
+- Current drone position from Unity
+- Obstacle distances from Unity
 
-
-It receives:
-
-
-- The target position from the Mission Manager
-
-- The current drone position from Unity
-
-- Obstacle distance readings from Unity
-
-
-It combines this information with the obstacle avoidance planner, calculates the next safe movement position, and publishes it to:
-
-
-```text
-
-/drone/command_position
-
-```
-
+It calculates the next commanded position and publishes it to Unity. When obstacle avoidance is enabled, it uses the Obstacle Avoidance Planner before producing the next movement command.
 
 #### Obstacle Avoidance Planner
 
+`obstacle_avoidance.py` contains the ROS-side static obstacle-avoidance logic.
 
-The Obstacle Avoidance Planner decides how the drone should react when an obstacle is detected.
-
-
-It evaluates the front, upper, lower, side, up, and down sensor readings and determines whether the drone should continue forward, climb, descend, or move sideways.
-
-
-Main planner states include:
-
+Planner modes:
 
 ```text
-
 NORMAL
-
 CLIMB
-
 DESCEND
-
 PASS
-
 SIDESTEP_LEFT
-
 SIDESTEP_RIGHT
-
 ```
 
-
-Possible movement actions include:
-
+Possible movement decisions:
 
 ```text
-
 FORWARD
-
 FORWARD_LEVEL
-
 UP
-
 DOWN
-
 LEFT
-
 RIGHT
-
 STOP
-
 ```
 
+Unity only measures obstacle distances. ROS decides how the drone reacts.
 
-#### ROS Launch File
+#### ROS Launch Files
 
+- `drone_demo.launch` starts ROS-TCP-Endpoint, Mission Manager, and Motion Controller.
+- `warehouse_demo.launch` reuses the generic launch file with `MainWarehouse` pickup/drop-off coordinates and warehouse-specific settings.
 
-`drone_demo.launch` starts ROS-TCP-Endpoint, the Mission Manager, and the Motion Controller and accepts configurable pickup/drop-off coordinates. `warehouse_demo.launch` reuses it with the `MainWarehouse` mission coordinates. Warehouse obstacle avoidance is disabled by default for the first integration test and can be enabled explicitly after sensor validation.
-
+Warehouse obstacle avoidance is disabled by default until the warehouse sensor readings are validated.
 
 #### Helper Scripts
 
-
-Scripts inside `ROS1/scripts/` simplify common development and testing tasks such as:
-
-
-- Building the ROS workspace
-
-- Starting the complete demo
-
-- Stopping the running ROS processes
-
-- Monitoring obstacle sensor data
-
-- Inspecting the current mission state and target
-
-- Manually sending pickup and drop confirmations
-
-- Running the end-to-end delivery demo and monitoring its result
-
-- Automatically testing the ROS mission sequence
-
-
-`test_mission.sh` provides manual mission inspection and testing commands.
-
-
-`test_full_mission.sh` automatically verifies the ROS mission sequence from pickup to mission completion.
-
-`run_delivery_demo.sh` keeps the smaller `SampleScene.unity` integration test. `sync_ros_workspace.sh` keeps the Catkin workspace synchronized with the repository. `run_warehouse_ros_demo.sh` builds the current ROS package, opens `MainWarehouse.unity`, starts the warehouse mission, and runs `delivery_demo_monitor.py`. Pass `false` for stage 1 without avoidance or `true` after warehouse sensor readings have been validated.
-
+| Script | Purpose |
+|---|---|
+| `sync_ros_workspace.sh` | Copies the repository ROS package into the Catkin workspace |
+| `build_ros.sh` | Syncs and builds the ROS workspace |
+| `run_delivery_demo.sh` | Runs the smaller `SampleScene` integration demo |
+| `run_warehouse_ros_demo.sh` | Runs the complete `MainWarehouse` mission |
+| `watch_obstacles.sh` | Displays Unity obstacle sensor readings |
+| `stop_demo.sh` | Stops the running ROS demo |
+| `test_mission.sh` / `test_full_mission.sh` | Mission testing helpers |
 
 ### Unity Components
 
-
 #### DroneCommandSubscriber.cs
 
+Subscribes to `/drone/command_position` and applies the position calculated by ROS to the Unity drone.
 
-Receives movement commands from:
-
-
-```text
-
-/drone/command_position
-
-```
-
-
-It moves the Unity drone toward the position calculated by ROS.
-
-
-Unity therefore performs the simulated movement, but the movement decision itself comes from ROS.
-
+Unity executes the movement; it does not choose the movement direction.
 
 #### DroneStatePublisher.cs
 
+Publishes the drone's Unity position to `/drone/current_position`.
 
-Continuously reports the drone's current Unity position to ROS through:
-
+Coordinate conversion:
 
 ```text
-
-/drone/current_position
-
+Unity (x, y, z)
+        ↓
+ROS   (x, z, y)
 ```
 
-
-This gives both the Motion Controller and Mission Manager feedback about where the drone actually is.
-
-
-The Motion Controller uses the position for navigation, while the Mission Manager uses it to determine when the drone has reached the pickup or drop-off target.
-
+Unity `y` is vertical, while ROS `z` is vertical.
 
 #### DroneObstacleSensorPublisher.cs
 
-
-Simulates the drone's obstacle sensors using Unity physics.
-
-
-It measures obstacle distances in several directions and publishes them through:
-
+Uses Unity physics to measure obstacle distances and publishes:
 
 ```text
-
-/drone/obstacle_distances
-
-```
-
-
-Sensor order:
-
-
-```text
-
 [
-
   front,
-
   upper_front,
-
   lower_front,
-
   left,
-
   right,
-
   up,
-
   down
-
 ]
-
 ```
 
-
-A value of `-1.0` means that no obstacle was detected within the configured sensor range.
-
+A value of `-1.0` means no obstacle was detected within the configured sensor range.
 
 #### PackageActionBridge.cs
 
+Connects ROS package commands to the Unity package system.
 
-Bridges ROS package commands to the physical Unity package-handling system.
+```text
+ROS PICKUP / DROP
+        ↓
+PackageActionBridge
+        ↓
+PackageHandling
+        ↓
+PICKUP_DONE / DROP_DONE
+        ↓
+ROS
+```
 
-
-It subscribes to `/drone/package_action`, calls `PackageHandling` for `PICKUP` or `DROP`, verifies that the requested action actually completed, and then publishes `PICKUP_DONE` or `DROP_DONE` through `/drone/package_action_status`.
-
+It automatically installs itself in `SampleScene`. In `MainWarehouse`, it is installed through the warehouse ROS setup.
 
 #### Drone Delivery Package System
 
+The physical package system is under `Unity/Assets/DroneDelivery/Runtime/`:
 
-The package-handling implementation is stored under `Unity/Assets/DroneDelivery/Runtime/`.
+- `PackageHandling.cs` — detects, picks up, carries, and drops packages
+- `GripperController.cs` — controls the gripper jaws
+- `DeliveryPackage.cs` — manages package attachment and release
+- `DeliveryRotor.cs` — rotor animation
+- `DeliveryDemo.cs` — standalone Unity-only package demo
 
-
-- `PackageHandling.cs` coordinates pickup, attachment, and drop-off
-
-- `GripperController.cs` opens and closes the gripper jaws
-
-- `DeliveryPackage.cs` represents a package that can be carried
-
-- `DeliveryRotor.cs` handles rotor animation
-
-
-`DroneGripperTest.unity` and `DeliveryDemo.cs` remain standalone package-system test assets. The warehouse-integrated workflow uses `MainWarehouse.unity`, `PackageActionBridge.cs`, and the ROS command/state/sensor components. `WarehouseRosSetup.cs` contains the shared warehouse ROS setup, while `WarehouseRosRuntimeBootstrap.cs` applies it when `MainWarehouse` enters Play Mode and disables any serialized `DeliveryDemo` so Unity cannot bypass ROS movement control.
-
+`DeliveryDemo.cs` is disabled during the ROS-controlled warehouse mission so it cannot move the drone independently of ROS.
 
 #### DroneRosTopics.cs
 
+Stores the Unity-side ROS topic names. The matching ROS constants are defined in `interfaces/ros_topics.py`.
 
-Stores the shared Unity-side ROS topic constants used by the runtime ROS scripts. The ROS package uses the matching `interfaces/ros_topics.py` module.
+#### Warehouse ROS Setup
 
+`WarehouseRosSetup.cs` contains the shared setup for the warehouse drone:
 
-#### ObstacleCourseCamera.cs
+- Adds the ROS command, state, sensor, and package bridge components
+- Keeps the drone Rigidbody kinematic for ROS-controlled movement
+- Disables `DeliveryDemo`
 
-
-Controls the camera used to observe the drone and obstacle course during the simulation.
-
+`WarehouseRosRuntimeBootstrap.cs` applies this setup when `MainWarehouse` enters Play Mode.
 
 #### Unity Editor Tools
 
-
-`DeliveryDemoSceneLauncher.cs` can open either `SampleScene.unity` or `MainWarehouse.unity` from the Linux helper scripts. `WarehouseDroneIntegrator.cs` places the M2 drone/package system in the warehouse and delegates ROS component setup to `WarehouseRosSetup.cs`.
-
+- `DeliveryDemoSceneLauncher.cs` opens `SampleScene` or `MainWarehouse` from helper scripts.
+- `WarehouseDroneIntegrator.cs` places the M2 drone/package system in the warehouse and applies the shared ROS setup.
+- `WarehouseDroneAutoRunOnce.cs` supports the warehouse editor integration workflow.
 
 ## Current Data Flow
 
+### Movement and sensing
 
 ```text
-
 Mission Manager
-
-      |
-
-      | /drone/target_position
-
-      v
-
-Motion Controller <──── /drone/current_position ──── Unity
-
-      ^                                             |
-
-      |                                             |
-
-      └──── /drone/obstacle_distances ──────────────┘
-
-      |
-
-Obstacle Avoidance Planner
-
-      |
-
-      v
-
+      │
+      │ /drone/target_position
+      ▼
 Motion Controller
-
-      |
-
-      | /drone/command_position
-
-      v
-
-Unity Drone
-
-      |
-
-      └──── updated position and sensor data ──────> ROS
-
-
-Package Mission Interface
-
-
-Mission Manager
-
-      |
-
-      | /drone/package_action
-
-      | PICKUP / DROP
-
-      v
-
-PackageActionBridge
-      |
-      v
-PackageHandling / Gripper
-
-      |
-
-      | /drone/package_action_status
-
-      | PICKUP_DONE / DROP_DONE
-
-      v
-
-Mission Manager
-
+      ▲
+      │ /drone/current_position
+      │ /drone/obstacle_distances
+      │
+    Unity
+      ▲
+      │ /drone/command_position
+      │
+Motion Controller
 ```
 
+ROS chooses the target and calculates the next movement command. Unity applies that command, then sends updated position and sensor measurements back to ROS.
 
-Main ROS topics:
+### Package handling
 
+```text
+Mission Manager
+      │
+      │ /drone/package_action
+      │ PICKUP / DROP
+      ▼
+PackageActionBridge
+      │
+      ▼
+PackageHandling / Gripper
+      │
+      │ /drone/package_action_status
+      │ PICKUP_DONE / DROP_DONE
+      ▼
+Mission Manager
+```
+
+### Main ROS Topics
 
 | Topic | Purpose |
 |---|---|
-| `/drone/target_position` | Current pickup or drop-off destination selected by the Mission Manager |
+| `/drone/target_position` | Current pickup or drop-off target selected by Mission Manager |
 | `/drone/current_position` | Current drone position reported by Unity |
-| `/drone/obstacle_distances` | Obstacle sensor readings reported by Unity |
-| `/drone/command_position` | Next safe movement position calculated by ROS |
-| `/drone/travel_heading` | Current direction of travel |
-| `/drone/mission_state` | Current stage of the delivery mission |
-| `/drone/package_action` | Pickup or drop command sent by the Mission Manager |
-| `/drone/package_action_status` | Confirmation that the requested package action has completed |
-
+| `/drone/obstacle_distances` | Obstacle measurements reported by Unity |
+| `/drone/command_position` | Next movement position calculated by ROS |
+| `/drone/travel_heading` | Horizontal travel direction used by Unity sensors |
+| `/drone/mission_state` | Current delivery mission state |
+| `/drone/package_action` | `PICKUP` or `DROP` request from ROS |
+| `/drone/package_action_status` | `PICKUP_DONE` or `DROP_DONE` confirmation from Unity |
 
 ## Workflow
 
-
-1. The Mission Manager starts the mission in `GO_TO_PICKUP`.
-
-2. The pickup position is published through `/drone/target_position`.
-
-3. Unity continuously reports the drone's current position and obstacle sensor readings.
-
-4. The Motion Controller calculates the next movement command. When obstacle avoidance is enabled, it uses the Obstacle Avoidance Planner.
-
-5. ROS publishes `/drone/command_position`, and Unity moves the drone.
-
-6. The control loop continues until the Mission Manager detects that the pickup point has been reached.
-
-7. The mission changes to `WAIT_FOR_PICKUP` and publishes `PICKUP`.
-
-8. `PackageActionBridge` performs the physical pickup through `PackageHandling`. After the package is attached and `PICKUP_DONE` is published, the Mission Manager changes to `GO_TO_DROPOFF`.
-
-9. The drop-off position becomes the new target.
-
-10. The ROS navigation loop continues until the drop-off point is reached. Obstacle avoidance is used when enabled; the current delivery demo disables it so the package workflow can be tested independently.
-
-11. The mission changes to `WAIT_FOR_DROP` and publishes `DROP`.
-
-12. `PackageActionBridge` releases the package and publishes `DROP_DONE`. The Mission Manager then changes to `COMPLETE`.
-
+1. Mission Manager starts `GO_TO_PICKUP` and publishes the pickup target.
+2. Unity reports the drone position and obstacle measurements.
+3. Motion Controller calculates the next position and sends it to Unity.
+4. The ROS ↔ Unity control loop continues until the pickup target is reached.
+5. Mission Manager requests `PICKUP`.
+6. Unity performs the physical pickup and returns `PICKUP_DONE`.
+7. Mission Manager switches to `GO_TO_DROPOFF` and publishes the drop-off target.
+8. ROS controls the drone to the drop-off point.
+9. Mission Manager requests `DROP`.
+10. Unity releases the package and returns `DROP_DONE`.
+11. Mission Manager changes the mission state to `COMPLETE`.
 
 ## Installation
 
-
 ### Requirements
 
-
 - Unity Editor `6000.6.0f1`
-
 - ROS 1 Noetic
-
 - Ubuntu 20.04 ROS environment
-
 - Git
-
 - Catkin
-
 - Unity ROS-TCP-Connector
-
 - ROS-TCP-Endpoint
-
 
 ROS-TCP-Endpoint:
 
-
 ```text
-
 https://github.com/Unity-Technologies/ROS-TCP-Endpoint
-
 ```
-
 
 ### Linux
 
+ROS Noetic can run directly on Ubuntu 20.04 or inside an Ubuntu 20.04 Distrobox container.
 
-ROS Noetic can run directly on Ubuntu 20.04 or inside an Ubuntu 20.04 container such as Distrobox.
-
-
-Clone the project:
-
+Clone the repository and create the Catkin workspace:
 
 ```bash
-
 git clone https://github.com/Dzzz83/DroneSortingProject.git
-
 cd DroneSortingProject
 
-```
-
-
-Create a Catkin workspace:
-
-
-```bash
-
 mkdir -p ~/drone_sorting_ros1_ws/src
-
 ```
-
-
-Copy the ROS package:
-
-
-```bash
-
-cp -r ROS1/src/drone_sorting ~/drone_sorting_ros1_ws/src/
-
-```
-
 
 Install ROS-TCP-Endpoint:
 
-
 ```bash
-
 cd ~/drone_sorting_ros1_ws/src
-
-
 git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
-
 ```
 
-
-Build the workspace:
-
+Build the project ROS package:
 
 ```bash
-
-cd ~/drone_sorting_ros1_ws
-
-
-source /opt/ros/noetic/setup.bash
-
-catkin_make
-
-source devel/setup.bash
-
+cd ~/DroneSortingProject
+bash ROS1/scripts/build_ros.sh
 ```
 
-
-Open the repository's `Unity` folder in Unity Hub.
-
-
-Configure:
-
+Open the repository's `Unity` folder in Unity Hub and configure:
 
 ```text
-
 Robotics → ROS Settings
 
-
 Protocol: ROS1
-
 IP:       127.0.0.1
-
 Port:     10000
-
 ```
 
+For the warehouse asset's legacy camera controller, set:
 
-Start ROS:
-
-
-```bash
-
-roslaunch drone_sorting drone_demo.launch
-
+```text
+Edit → Project Settings → Player
+Active Input Handling: Both
 ```
 
-
-For the current package-delivery workflow, obstacle avoidance can be disabled explicitly:
-
+Run the warehouse mission without obstacle avoidance:
 
 ```bash
-
-roslaunch drone_sorting drone_demo.launch enable_obstacle_avoidance:=false
-
-```
-
-
-On the current Linux/Distrobox development setup, `run_delivery_demo.sh` runs the smaller SampleScene test. For the warehouse integration, use:
-
-```bash
-
 bash ROS1/scripts/run_warehouse_ros_demo.sh false
-
 ```
 
-After the warehouse sensor values have been inspected with `ROS1/scripts/watch_obstacles.sh`, enable M3 obstacle avoidance with:
+When Unity finishes loading `MainWarehouse`, press **Play**.
+
+After validating warehouse sensor readings, enable obstacle avoidance with:
 
 ```bash
-
 bash ROS1/scripts/run_warehouse_ros_demo.sh true
-
 ```
-
-
-Then press **Play** in Unity.
-
 
 ### Windows
 
+Run Unity normally on Windows and run ROS 1 Noetic inside **WSL2 Ubuntu 20.04**.
 
-Unity runs normally on Windows, while ROS 1 Noetic should run inside **WSL2 with Ubuntu 20.04**.
-
-
-Inside WSL:
-
-
-```bash
-
-git clone https://github.com/Dzzz83/DroneSortingProject.git
-
-cd DroneSortingProject
-
-
-mkdir -p ~/drone_sorting_ros1_ws/src
-
-cp -r ROS1/src/drone_sorting ~/drone_sorting_ros1_ws/src/
-
-```
-
-
-Install ROS-TCP-Endpoint:
-
-
-```bash
-
-cd ~/drone_sorting_ros1_ws/src
-
-
-git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
-
-```
-
-
-Build the ROS workspace:
-
-
-```bash
-
-cd ~/drone_sorting_ros1_ws
-
-
-source /opt/ros/noetic/setup.bash
-
-catkin_make
-
-source devel/setup.bash
-
-```
-
+Inside WSL, clone the repository, create `~/drone_sorting_ros1_ws/src`, install ROS-TCP-Endpoint, and build the ROS package as described in the Linux section.
 
 Open the repository's `Unity` folder with Unity Hub on Windows.
 
-
-Start ROS inside WSL:
-
-
-```bash
-
-roslaunch drone_sorting drone_demo.launch
-
-```
-
-
-Configure Unity:
-
+Configure Unity ROS Settings:
 
 ```text
-
 Protocol: ROS1
-
 Port:     10000
-
 ```
 
-
-Try:
-
-
-```text
-
-127.0.0.1
-
-```
-
-
-first.
-
-
-If Unity cannot connect to ROS through WSL, get the WSL IP:
-
+Try `127.0.0.1` first. If Unity cannot reach ROS through WSL2, run:
 
 ```bash
-
 hostname -I
-
 ```
 
-
-and use that IP in Unity's ROS Settings.
-
-
-Then press **Play**.
-
+and use the WSL2 IP address in Unity's ROS Settings.
 
 ## Current Status
 
-
-Currently working:
-
+### Working
 
 - ROS ↔ Unity communication
-
-- Target-based autonomous movement
-
-- Position feedback
-
-- Obstacle sensing
-
-- ROS-based motion control
-
-- Static obstacle avoidance
-
-- Automatic climbing and descending
-
-- Side-step avoidance support
-
 - ROS delivery mission state machine
-
+- ROS-controlled drone movement
+- Unity position feedback
+- Unity obstacle sensing
+- Physical gripper and package attachment/release
 - Automatic pickup and drop-off target switching
+- End-to-end `MainWarehouse` delivery with ROS controlling the mission and movement
+- Static obstacle avoidance validated in `SampleScene`
+- Climb, descend, pass, and side-step avoidance logic
 
-- Pickup and drop command interface
+### Next
 
-- Physical gripper and package attachment/detachment
-
-- ROS package commands integrated with the Unity package system
-
-- End-to-end pickup, carry, drop-off, and mission completion in the smaller integration scene
-
-- MainWarehouse ROS runtime integration validated end-to-end with Unity `DeliveryDemo` disabled
-
-- Warehouse-specific mission coordinates and staged avoidance launch
-
-- Mission-state monitoring
-
-- Automated ROS mission testing and delivery demo verification
-
-
-Planned work:
-
-
-- Validate warehouse sensor readings, then enable and tune obstacle avoidance
-
-- Improved sensing
-
-- Dynamic obstacle avoidance
-
-- Final warehouse/environment polish
+- Validate obstacle sensor readings in `MainWarehouse`
+- Enable and tune static obstacle avoidance in `MainWarehouse`
+- Improve sensing where needed
+- Add dynamic obstacle avoidance
+- Final warehouse and system polish
