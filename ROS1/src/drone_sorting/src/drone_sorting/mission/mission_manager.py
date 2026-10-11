@@ -27,11 +27,9 @@ class MissionManager:
         self.current_position = None
         self.current_target = None
 
-        self.arrival_tolerance = float(
-            rospy.get_param(
-                "~arrival_tolerance",
-                MissionConfig.ARRIVAL_TOLERANCE,
-            )
+        self.arrival_tolerance = self._get_float_param(
+            "~arrival_tolerance",
+            MissionConfig.ARRIVAL_TOLERANCE,
         )
 
         self.target_publisher = rospy.Publisher(
@@ -199,6 +197,7 @@ class MissionManager:
             - self.current_position.z
         )
 
+
         distance = math.sqrt(
             dx * dx
             + dy * dy
@@ -242,28 +241,28 @@ class MissionManager:
         )
 
     @staticmethod
-    def _load_position(prefix, default_position):
-        return Point(
-            x=float(
-                rospy.get_param(
-                    f"~{prefix}_x",
-                    default_position.x,
-                )
-            ),
-            y=float(
-                rospy.get_param(
-                    f"~{prefix}_y",
-                    default_position.y,
-                )
-            ),
-            z=float(
-                rospy.get_param(
-                    f"~{prefix}_z",
-                    default_position.z,
-                )
-            ),
+    def _load_position(position_name, default_position):
+        x = MissionManager._get_float_param(
+            f"~{position_name}_x",
+            default_position.x,
         )
 
+        y = MissionManager._get_float_param(
+            f"~{position_name}_y",
+            default_position.y,
+        )
+
+        z = MissionManager._get_float_param(
+            f"~{position_name}_z",
+            default_position.z,
+        )
+
+        return Point(
+            x=x,
+            y=y,
+            z=z,
+        )
+    
     @staticmethod
     def _calculate_heading(current_position, target):
         if current_position is None:
@@ -293,3 +292,12 @@ class MissionManager:
             y=dy / length,
             z=0.0,
         )
+
+    @staticmethod
+    def _get_float_param(name, default):
+        value = rospy.get_param(name, default)
+
+        if not isinstance(value, (int, float)):
+            raise TypeError(f"ROS parameter '{name}' must be numeric")
+
+        return float(value)
