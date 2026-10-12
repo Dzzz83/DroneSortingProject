@@ -5,6 +5,9 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   rospy
   std_msgs
+  sensor_msgs
+  message_filters
+  tf2_msgs
 )
 
 # Enable the Python package defined in setup.py
@@ -15,6 +18,9 @@ catkin_package(
     geometry_msgs
     rospy
     std_msgs
+    sensor_msgs
+    message_filters
+    tf2_msgs
 )
 
 # ROS executable nodes
@@ -22,6 +28,7 @@ catkin_install_python(
   PROGRAMS
     scripts/mission_manager_node.py
     scripts/motion_controller_node.py
+    scripts/camera_stream_check_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
