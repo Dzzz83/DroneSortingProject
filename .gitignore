@@ -30,3 +30,6 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local agent guidance
+/AGENTS.md

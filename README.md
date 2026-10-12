@@ -481,6 +481,119 @@ bash ROS1/scripts/run_warehouse_ros_demo.sh true
 
 ## Current Status
 
+### Planned visual-search demo
+
+`MainWarehouse` contains three identical delivery-package prefab instances in
+the existing 5 × 5 m pickup area, centered at Unity X=34, Z=25. Package centers
+start at Unity (34.23, 0.44, 25.10), (32.70, 0.44, 23.70), and
+(35.30, 0.44, 26.30). These are scene-placement facts, not inputs to the planned
+ROS perception system.
+
+The planned observation waypoint is directly above the pickup-area center:
+Unity (34, observation_height, 25), or ROS (34, 25, observation_height).
+Its height will be selected after checking camera coverage and warehouse clearance.
+ROS will know the area boundaries (Unity X=31.5–36.5, Z=22.5–27.5) and drop zone,
+but will discover package locations from RGB-depth observations.
+
+The planned mission observes the area, selects an accessible package, approaches
+and picks it up, delivers it to the drop zone, and returns to observe again.
+Completion requires repeated valid observations covering the pickup area with no
+remaining packages; a missed detection or camera failure must not count as empty.
+The three-package count is for demo evaluation, not a mission stopping condition.
+ROS will select separate release positions within the destination zone to avoid
+dropping subsequent packages onto previously delivered packages.
+
+`MainWarehouse` now has a persistent `PackageRgbCamera` child on the delivery
+drone. `DroneRgbCamera` configures its local position `(0, -0.55, -0.60)` and
+rotation `(55, 0, 0)` degrees: 35 degrees from straight down toward the gripper.
+The provisional simulated lens is 800 × 600 with a 110-degree **vertical** field
+of view and 0.05–30 m clipping planes; these are not real sensor specifications
+or a validated depth range. The camera renders on demand, not to the spectator
+display. `WarehouseRosSetup` reuses this child rather than adding duplicates.
+
+To verify the installation, stop Play Mode and save existing edits, then use
+**Drone Delivery → Install and Verify Warehouse RGB Camera**. This checks the
+mount, duplicate prevention, and frustum coverage, renders observation/approach/
+open/closed-jaw views to the system temporary directory under
+`drone-permanent-rgb-verification/`, restores the drone and jaws, and saves the
+camera installation. The observation check uses drone root height 6 m; it checks
+coverage, not flight clearance. Inspect the images separately for occlusion.
+
+The RGB mount and its four rendered views have been verified in Unity.
+`RgbDepthCapture` provides on-demand, aligned RGB and floating-point depth from
+the same HDRP camera render. Arrays use top-left origin; RGB is packed RGB bytes,
+and depth is optical-axis distance in metres with `NaN` for missing/out-of-range
+measurements. The provisional capture range is 0.2–15 m. Opaque depth-writing
+surfaces are supported; transparent surfaces without depth writes are not.
+
+Use **Drone Delivery → Verify Warehouse RGB Depth Capture** with MainWarehouse
+open and Play Mode stopped. It tests known-distance colored probes, off-axis
+depth, RGB/depth row alignment, missing depth, range filtering, and repeated
+warehouse/gripper capture. Temporary objects and drone/jaw poses are restored;
+the scene is not saved. Images and a report go to the temporary directory under
+`drone-rgb-depth-verification/`. These checks passed; five warmed observation
+captures averaged 64.8 ms each in the editor, not a runtime throughput guarantee.
+
+`DroneCameraPublisher` is configured by the warehouse runtime setup. It starts
+with 2 captures per second, queue size 1, and no catch-up bursts; capture pauses
+when the ROS connection is unavailable. Unity compilation and message/coordinate
+checks passed, including arbitrary drone rotation and TF composition. ROS Noetic
+also independently decoded all six saved Unity message types and checked their
+metadata, depth values, calibration, and TF translation. The sensor-only live
+test passed: ROS received five synchronized 800 × 600 observations at roughly
+2 FPS, with valid encodings, layouts, calibration, poses, and acquisition times.
+A separate live check confirmed that `warehouse → drone_base →
+package_camera_optical` agrees with the stamped camera pose, drone position,
+and optical axes.
+No mission or motion controller ran during these checks; they establish sensor
+communication, not package recognition, navigation, or real-hardware readiness.
+Synchronous readback
+can stall rendering, so the editor measurement does not justify higher rates.
+Restart Play Mode after changing capture dimensions or depth limits.
+
+| Topic | Message / meaning |
+| --- | --- |
+| `/drone/camera/rgb/image_raw` | `sensor_msgs/Image`, `rgb8`, top-down packed rows |
+| `/drone/camera/depth/image_raw` | `sensor_msgs/Image`, `32FC1`, optical-axis metres, invalid `NaN` |
+| `/drone/camera/camera_info` | `sensor_msgs/CameraInfo`, ideal pinhole intrinsics, zero distortion |
+| `/drone/camera/pose` | `geometry_msgs/PoseStamped`, optical camera pose in `warehouse` |
+| `/drone/current_pose` | `geometry_msgs/PoseStamped`, drone body pose in `warehouse` |
+| `/tf` | `tf2_msgs/TFMessage`, `warehouse → drone_base → package_camera_optical` |
+
+Each observation's messages share a sequence and UTC acquisition timestamp;
+use ROS wall time (`use_sim_time=false`), with synchronized clocks if separate
+computers are used. Existing `/drone/current_position` is unchanged. World
+positions retain Unity `(x,y,z)` → ROS `(x,z,y)`. Drone body axes are forward,
+left, up; optical axes are right, down, forward. Rotations are converted using
+these bases, not by swapping quaternion components. The calibration is for the
+undistorted simulated lens, not measured real-camera calibration.
+
+After building the ROS package, run `roslaunch drone_sorting camera_validation.launch`
+in the ROS environment, then start MainWarehouse Play Mode. This starts only the
+TCP endpoint and read-only sensor checker, not mission or motion nodes. Do not
+run it alongside another endpoint on port 10000. Use `required_frames:=5` for a
+finite checker; stop the launch afterward because the endpoint remains running.
+The checker validates synchronized images, calibration, pose, data layouts, and
+freshness; it does not prove detection accuracy or flight safety.
+
+Focused Python checks:
+`PYTHONPATH=ROS1/src/drone_sorting/src python3 -m unittest discover -s ROS1/src/drone_sorting/tests -v`.
+Run in ROS Noetic for all 15 tests; the seven ROS-message contract tests are
+skipped without ROS dependencies. Unity message formatting and transform checks
+are available through **Drone Delivery → Verify Camera ROS Messages**.
+To independently decode that verifier's binary fixtures in ROS Noetic, run
+`PYTHONPATH=ROS1/src/drone_sorting/src python3 ROS1/src/drone_sorting/tests/verify_unity_camera_messages.py <fixture_directory>`.
+The default fixture directory is the system temporary directory under
+`drone-camera-message-verification/`; copy fixtures when ROS runs in a container
+with a separate temporary filesystem.
+With the sensor-only launch and Unity Play Mode running, check live pose/TF
+consistency using
+`PYTHONPATH=ROS1/src/drone_sorting/src python3 ROS1/src/drone_sorting/tests/verify_live_camera_transforms.py`.
+It waits up to 15 seconds for a synchronized observation and sends no commands.
+
+Camera perception and repeated delivery are not implemented yet. The existing
+warehouse launch still performs its single delivery using fixed pickup coordinates.
+
 ### Working
 
 - ROS ↔ Unity communication

@@ -22,6 +22,8 @@ public static class WarehouseRosSetup
         EnsureComponent<DroneStatePublisher>(drone);
         EnsureComponent<DroneObstacleSensorPublisher>(drone);
         EnsureComponent<PackageActionBridge>(drone);
+        DroneRgbCamera.EnsureOnDrone(drone);
+        EnsureComponent<DroneCameraPublisher>(drone);
 
         Rigidbody body = drone.GetComponent<Rigidbody>();
 

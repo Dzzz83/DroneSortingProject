@@ -1,0 +1,12 @@
+<launch>
+    <!-- Sensor-only check: deliberately starts no mission or motion controller. -->
+    <arg name="required_frames" default="0" />
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip" value="0.0.0.0" />
+        <arg name="tcp_port" value="10000" />
+    </include>
+    <node pkg="drone_sorting" type="camera_stream_check_node.py"
+          name="camera_stream_check" output="screen">
+        <param name="required_frames" value="$(arg required_frames)" />
+    </node>
+</launch>
