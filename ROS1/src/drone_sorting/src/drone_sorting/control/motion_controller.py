@@ -2,7 +2,7 @@ import math
 
 import rospy
 from geometry_msgs.msg import Point
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32, Float32MultiArray
 from drone_sorting.interfaces import ros_topics
 
 from drone_sorting.planning.obstacle_avoidance import (
@@ -12,8 +12,24 @@ from drone_sorting.planning.obstacle_avoidance import (
 
 class MotionController:
     def __init__(self):
-        self.speed = 2.0
+        self.speed = float(rospy.get_param("~speed", 2.0))
+        if not math.isfinite(self.speed) or self.speed <= 0:
+            raise ValueError("Motion speed must be finite and positive")
+        self.maximum_speed = self.speed
+        self.enable_dynamic_speed = rospy.get_param("~enable_dynamic_speed", False)
         self.update_rate = 20.0
+        self.position_timeout = float(rospy.get_param("~position_timeout", 0.0))
+        self.target_timeout = float(rospy.get_param("~target_timeout", 0.0))
+        self.speed_timeout = float(rospy.get_param("~speed_timeout", 0.0))
+        for name in ("position_timeout", "target_timeout", "speed_timeout"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(name + " must be finite and nonnegative")
+        self.position_received = None
+        self.target_received = None
+        self.speed_received = None
+        if self.enable_dynamic_speed:
+            self.speed = 0.0
 
         # Allows obstacle avoidance to be disabled
         # for delivery demonstrations.
@@ -37,7 +53,7 @@ class MotionController:
         self.command_publisher = rospy.Publisher(
             ros_topics.COMMAND_POSITION,
             Point,
-            queue_size=10,
+            queue_size=1 if self.enable_dynamic_speed else 10,
         )
 
         rospy.Subscriber(
@@ -57,6 +73,8 @@ class MotionController:
             Float32MultiArray,
             self._obstacle_callback,
         )
+        if self.enable_dynamic_speed:
+            rospy.Subscriber(ros_topics.COMMAND_SPEED, Float32, self._speed_callback)
 
         rospy.loginfo(
             "Motion Controller started "
@@ -79,6 +97,9 @@ class MotionController:
         self,
         message,
     ):
+        if not all(math.isfinite(value) for value in (message.x, message.y, message.z)):
+            return
+        self.position_received = rospy.get_time()
         self.current_position = Point(
             x=message.x,
             y=message.y,
@@ -97,6 +118,11 @@ class MotionController:
         self,
         message,
     ):
+        if not all(math.isfinite(value) for value in (message.x, message.y, message.z)):
+            return
+        self.target_received = rospy.get_time()
+        unchanged = self.target_position is not None and all(
+            getattr(self.target_position, axis) == getattr(message, axis) for axis in ("x", "y", "z"))
         self.target_position = Point(
             x=message.x,
             y=message.y,
@@ -105,6 +131,8 @@ class MotionController:
 
         # New mission target -> reset the
         # stateful avoidance planner.
+        if unchanged:
+            return
         self.avoidance_planner.reset()
 
         rospy.loginfo(
@@ -126,11 +154,35 @@ class MotionController:
             message.data[:7]
         )
 
+    def _speed_callback(self, message):
+        if not math.isfinite(message.data) or not 0 <= message.data <= self.maximum_speed:
+            self.speed = 0.0
+            self.speed_received = None
+            return
+        self.speed = message.data
+        self.speed_received = rospy.get_time()
+
+    @staticmethod
+    def _feedback_expired(received, timeout, now):
+        return timeout > 0 and (received is None or not 0 <= now - received <= timeout)
+
     def _update_command(self):
         if self.command_position is None:
             return
 
         if self.target_position is None:
+            return
+        now = rospy.get_time()
+        if (self._feedback_expired(self.position_received, self.position_timeout, now)
+                or self._feedback_expired(self.target_received, self.target_timeout, now)):
+            # Stop advancing commands when feedback or the guidance heartbeat disappears.
+            return
+        if self.enable_dynamic_speed and (self.speed_received is None
+                or self._feedback_expired(self.speed_received, self.speed_timeout, now)):
+            return
+        if self.speed == 0:
+            # Unity retains its last applied position. Do not send a lagging feedback
+            # position as a hold command, which could move the drone backward.
             return
 
         # Difference between current commanded
@@ -199,12 +251,13 @@ class MotionController:
             self._log_status(decision)
             return
 
-        # 2 m/s / 20 Hz =
-        # approximately 0.1 m per update.
+        # The selected speed limits each 20 Hz position step.
         step = (
             self.speed
             / self.update_rate
         )
+        if decision == self.avoidance_planner.FORWARD:
+            step = min(step, distance)
 
         move_x, move_y, move_z = movement
 

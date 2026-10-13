@@ -32,6 +32,7 @@ public static class WarehouseRosRuntimeBootstrap
         WarehouseRosSetup.ConfigureDrone(
             packageHandling.gameObject
         );
+        WarehouseRosSetup.ConfigureSpectatorCamera(packageHandling.transform);
 
         Debug.Log(
             "WAREHOUSE_ROS_RUNTIME_READY " +
