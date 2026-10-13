@@ -1,0 +1,167 @@
+"""Exercise real launcher refusal paths without starting Unity or ROS services."""
+import os
+from pathlib import Path
+import socket
+import subprocess
+import tempfile
+import time
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+LAUNCHER = ROOT / 'ROS1/scripts/run_camera_delivery_demo.sh'
+
+
+class CameraLauncherTests(unittest.TestCase):
+    def test_unknown_option_is_rejected_before_startup(self):
+        result = subprocess.run(['bash', str(LAUNCHER), '--automatic-play'],
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('always restarts the demo', result.stderr)
+
+    def run_launcher(self, **overrides):
+        environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true')
+        environment.update(overrides)
+        # Restart tests must never target the developer's real open project.
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            scene = project / 'Unity/Assets/Scenes/MainWarehouse.unity'
+            scene.parent.mkdir(parents=True)
+            scene.touch()
+            tools = project / 'ROS1/tools'
+            tools.mkdir(parents=True)
+            (tools / 'camera_demo_processes.py').write_text(
+                (ROOT / 'ROS1/tools/camera_demo_processes.py').read_text())
+            environment['PROJECT_ROOT'] = temporary
+            return subprocess.run(['bash', str(LAUNCHER)], env=environment,
+                                  capture_output=True, text=True, timeout=20)
+
+
+    def test_missing_unity_has_actionable_error(self):
+        result = self.run_launcher(UNITY_EDITOR='/nonexistent/camera-demo-unity')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('set UNITY_EDITOR', result.stderr)
+
+    def test_missing_weights_fails_before_starting_services(self):
+        result = self.run_launcher(DETECTOR_WEIGHTS='/nonexistent/camera-demo-weights.pt')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('set DETECTOR_WEIGHTS', result.stderr)
+
+    def test_existing_service_is_not_terminated(self):
+        with tempfile.NamedTemporaryFile() as weights, socket.socket() as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                server.bind(('127.0.0.1', 10001))
+            except OSError:
+                self.skipTest('Port 10001 already occupied')
+            server.listen()
+            result = self.run_launcher(DETECTOR_WEIGHTS=weights.name)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Port 10001 is unavailable', result.stderr)
+            with socket.create_connection(('127.0.0.1', 10001), timeout=1):
+                pass
+
+    def test_unity_recovery_backups_are_preserved_before_opening(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backups = root / 'Unity/Temp/__Backupscenes'
+            backups.mkdir(parents=True)
+            (backups / '0.backup').write_text('recoverable scene')
+            run = root / 'run'
+            run.mkdir()
+            definitions = root / 'launcher-functions.sh'
+            definitions.write_text(LAUNCHER.read_text().split('\ncheck_dependencies "$@"', 1)[0])
+            editor = root / 'editor'
+            editor.write_text('''#!/usr/bin/env python3
+import pathlib, sys, time
+log = pathlib.Path(sys.argv[sys.argv.index('-logFile') + 1])
+log.write_text('Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity\\n')
+time.sleep(30)
+''')
+            editor.chmod(0o755)
+            command = '''source "$1"
+RUN_DIR="$2"
+DETECTOR_PID=$$
+ROS_WRAPPER_PID=$$
+trap '[[ -z "$UNITY_PID" ]] || kill -TERM "$UNITY_PID" 2>/dev/null || true' EXIT
+open_unity
+'''
+            result = subprocess.run(['bash', '-c', command, 'bash', str(definitions), str(run)],
+                                    env=dict(os.environ, PROJECT_ROOT=str(root), UNITY_EDITOR=str(editor)),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(backups.exists())
+            self.assertEqual((run / 'unity-scene-backups/0.backup').read_text(), 'recoverable scene')
+
+    @unittest.skipUnless(Path('/opt/ros/noetic/setup.bash').exists(), 'Requires ROS Noetic')
+    def test_existing_workspace_package_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / 'workspace'
+            destination = workspace / 'src/drone_sorting'
+            destination.mkdir(parents=True)
+            sentinel = destination / 'user-owned.txt'
+            sentinel.write_text('keep me')
+            result = subprocess.run(['bash', str(ROOT / 'ROS1/scripts/prepare_camera_demo_ros.sh'),
+                                     str(ROOT), str(workspace),
+                                     str(Path.home() / 'drone_sorting_ros1_ws/src/ROS-TCP-Endpoint'), temporary],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already owned by another package', result.stdout)
+            self.assertEqual(sentinel.read_text(), 'keep me')
+
+    @unittest.skipUnless(Path('/opt/ros/noetic/setup.bash').exists(), 'Requires ROS Noetic')
+    def test_finished_monitor_preserves_ros_until_supervisor_is_stopped(self):
+        for status in (0, 1):
+            with self.subTest(monitor_exit_status=status):
+                self.check_finished_monitor(status)
+
+    def check_finished_monitor(self, monitor_status):
+        # Replace external ROS commands, but exercise the actual supervisor's
+        # failure handling and signal cleanup without taking over real ports.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            commands = root / 'commands'
+            commands.mkdir()
+            devel = root / 'workspace/devel'
+            devel.mkdir(parents=True)
+            (devel / 'setup.bash').write_text(f'export PATH="{commands}:$PATH"\n')
+            scripts = {
+                'rosnode': '#!/bin/bash\nprintf "%s\\n" /unity_endpoint /package_perception /camera_pickup /motion_controller\n',
+                'python3': '#!/bin/bash\nif [[ "$1" == - ]]; then cat >/dev/null; exit 0; fi\nexit "$MONITOR_EXIT_STATUS"\n',
+                'roslaunch': '''#!/usr/bin/python3
+import os, signal, sys, time
+from pathlib import Path
+root = Path(os.environ['SUPERVISOR_TEST_ROOT'])
+(root / 'launch.pid').write_text(str(os.getpid()))
+signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+try:
+    while True:
+        time.sleep(0.1)
+finally:
+    (root / 'launch-stopped').touch()
+''',
+            }
+            for name, content in scripts.items():
+                executable = commands / name
+                executable.write_text(content)
+                executable.chmod(0o755)
+            with (root / 'supervisor.log').open('w') as output:
+                process = subprocess.Popen(['bash', str(ROOT / 'ROS1/scripts/start_camera_demo_ros.sh'),
+                                            str(ROOT), str(root / 'workspace'), str(root)],
+                                           env=dict(os.environ, SUPERVISOR_TEST_ROOT=str(root),
+                                                    MONITOR_EXIT_STATUS=str(monitor_status)),
+                                           stdout=output, stderr=subprocess.STDOUT)
+                try:
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        if 'ROS remains available' in (root / 'supervisor.log').read_text():
+                            break
+                        self.assertIsNone(process.poll(), (root / 'supervisor.log').read_text())
+                        time.sleep(0.1)
+                    self.assertIn('ROS remains available', (root / 'supervisor.log').read_text())
+                    self.assertIsNone(process.poll())
+                    os.kill(int((root / 'launch.pid').read_text()), 0)
+                finally:
+                    process.terminate()
+                    process.wait(timeout=10)
+                self.assertTrue((root / 'launch-stopped').exists())
+                self.assertFalse((root / 'ros-supervisor.pid').exists())

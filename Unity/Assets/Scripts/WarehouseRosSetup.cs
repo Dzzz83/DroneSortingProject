@@ -1,5 +1,6 @@
 using System;
 using DroneDelivery;
+using Unity.Cinemachine;
 using UnityEngine;
 
 public static class WarehouseRosSetup
@@ -44,6 +45,39 @@ public static class WarehouseRosSetup
         foreach (DeliveryDemo demo in demos)
         {
             demo.enabled = false;
+        }
+    }
+
+    public static void ConfigureSpectatorCamera(Transform drone)
+    {
+        foreach (CinemachineCamera camera in
+                 UnityEngine.Object.FindObjectsByType<CinemachineCamera>(FindObjectsSortMode.None))
+        {
+            if (camera.Follow != drone)
+                continue;
+
+            // This component positions the virtual camera directly; disable
+            // the old close-framing composer so it cannot overwrite the view.
+            var composer = camera.GetComponent<CinemachinePositionComposer>();
+            if (composer != null)
+                composer.enabled = false;
+            var spectator = camera.GetComponent<WarehouseSpectatorCamera>();
+            if (spectator == null)
+                spectator = camera.gameObject.AddComponent<WarehouseSpectatorCamera>();
+            spectator.Configure(drone);
+            CinemachineDeoccluder deoccluder = camera.GetComponent<CinemachineDeoccluder>();
+            if (deoccluder == null)
+                deoccluder = camera.gameObject.AddComponent<CinemachineDeoccluder>();
+            deoccluder.CollideAgainst = Physics.DefaultRaycastLayers;
+            // Ignore the tracked drone's own body and gripper near its root.
+            deoccluder.MinimumDistanceFromTarget = 1.25f;
+            var avoidance = deoccluder.AvoidObstacles;
+            avoidance.Enabled = true;
+            avoidance.CameraRadius = 0.2f;
+            avoidance.MinimumOcclusionTime = 0f;
+            avoidance.DampingWhenOccluded = 0f;
+            deoccluder.AvoidObstacles = avoidance;
+            Debug.Log("WAREHOUSE_SPECTATOR_READY wide aisle view with camera deocclusion");
         }
     }
 

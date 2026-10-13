@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import argparse
+import json
+import sys
+
 import rospy
 from std_msgs.msg import String
 
@@ -9,7 +13,10 @@ from drone_sorting.interfaces import ros_topics
 class DeliveryDemoMonitor:
     """Displays and verifies the end-to-end delivery mission."""
 
-    def __init__(self):
+    def __init__(self, camera_guidance=False):
+        self.last_phase = None
+        self.failure_reason = None
+        self.last_perception = None
         self.last_state = None
         self.last_action = None
         self.last_status = None
@@ -38,12 +45,54 @@ class DeliveryDemoMonitor:
             ),
         ]
 
+        if camera_guidance:
+            self.subscribers.append(rospy.Subscriber(
+                ros_topics.PICKUP_TRIAL_STATUS, String, self._on_guidance))
+            self.subscribers.append(rospy.Subscriber(
+                ros_topics.PACKAGE_CANDIDATES, String, self._on_perception))
+
+    def _on_perception(self, message):
+        try:
+            observation = json.loads(message.data)
+            state, reason = observation["state"], observation.get("reason")
+            if not isinstance(state, str) or (reason is not None and not isinstance(reason, str)):
+                raise ValueError("Invalid perception fields")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            rospy.logwarn("Ignoring malformed package perception status")
+            return
+        status = (state, reason)
+        if status != self.last_perception:
+            self.last_perception = status
+            print(f"[VISION]  {state}: {reason or 'no rejection reason'}", flush=True)
+
+    def _on_guidance(self, message):
+        try:
+            status = json.loads(message.data)
+            phase = status["phase"]
+            reason = status.get("reason")
+            if not isinstance(phase, str) or (reason is not None and not isinstance(reason, str)):
+                raise ValueError("Invalid guidance fields")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            rospy.logwarn("Ignoring malformed camera guidance status")
+            return
+        if phase == self.last_phase:
+            return
+        self.last_phase = phase
+        print(f"[PHASE]   {phase}", flush=True)
+        if phase == "FAILED":
+            self.failure_reason = reason or "unspecified_guidance_failure"
+            print(f"[FAIL]    {self.failure_reason}", flush=True)
+            if self.last_perception is not None:
+                print(f"[VISION]  Last result: {self.last_perception}", flush=True)
+            rospy.signal_shutdown(self.failure_reason)
+
     def run(self):
         rospy.loginfo(
             "Delivery demo monitor started"
         )
 
         rospy.spin()
+        return 1 if self.failure_reason else 0
 
     def _on_state(self, message):
         state = message.data.strip().upper()
@@ -153,7 +202,7 @@ class DeliveryDemoMonitor:
             flush=True,
         )
         print(
-            "[RESULT]  DELIVERY END-TO-END TEST PASSED",
+            "[RESULT]  Pickup and drop acknowledgements confirmed",
             flush=True,
         )
         print(
@@ -167,13 +216,16 @@ class DeliveryDemoMonitor:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Observe delivery state, actions, and optional camera phases.")
+    parser.add_argument("--camera-guidance", action="store_true")
+    args = parser.parse_args(rospy.myargv()[1:])
     rospy.init_node(
         "delivery_demo_monitor"
     )
 
-    monitor = DeliveryDemoMonitor()
-    monitor.run()
+    monitor = DeliveryDemoMonitor(camera_guidance=args.camera_guidance)
+    return monitor.run()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

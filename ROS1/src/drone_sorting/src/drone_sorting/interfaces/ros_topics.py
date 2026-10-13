@@ -3,6 +3,8 @@
 CURRENT_POSITION = "/drone/current_position"
 TARGET_POSITION = "/drone/target_position"
 COMMAND_POSITION = "/drone/command_position"
+COMMAND_SPEED = "/drone/command_speed"
+PICKUP_TRIAL_STATUS = "/drone/pickup_trial_status"
 
 OBSTACLE_DISTANCES = "/drone/obstacle_distances"
 TRAVEL_HEADING = "/drone/travel_heading"
@@ -18,3 +20,4 @@ CAMERA_INFO = "/drone/camera/camera_info"
 CAMERA_POSE = "/drone/camera/pose"
 CURRENT_POSE = "/drone/current_pose"
 TRANSFORMS = "/tf"
+PACKAGE_CANDIDATES = "/drone/package_candidates"

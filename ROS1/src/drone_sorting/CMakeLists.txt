@@ -29,6 +29,8 @@ catkin_install_python(
     scripts/mission_manager_node.py
     scripts/motion_controller_node.py
     scripts/camera_stream_check_node.py
+    scripts/package_perception_node.py
+    scripts/camera_pickup_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

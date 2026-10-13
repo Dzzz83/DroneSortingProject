@@ -4,6 +4,9 @@ Unity + ROS 1 simulation for an autonomous drone that transports lightweight pac
 
 ROS is the main control system. Unity simulates the warehouse, drone, sensors, package handling, and rendering.
 
+For a detailed handoff, see [project context](docs/project_context.md),
+the [next implementation plan](docs/PLAN.md), and [verification results and checks](docs/verification.md).
+
 ## Table of Contents
 
 - [Project Overview](#project-overview)
@@ -26,7 +29,7 @@ The project separates **decision-making** from **simulation**.
 **ROS 1** is responsible for:
 
 - Managing mission states and pickup/drop-off targets
-- Processing drone position and obstacle sensor data
+- Processing RGB-depth observations, drone position, and obstacle sensor data
 - Calculating movement commands
 - Deciding obstacle-avoidance actions
 - Requesting package pickup and drop
@@ -35,7 +38,7 @@ The project separates **decision-making** from **simulation**.
 
 - Simulating the warehouse, drone, obstacles, and package
 - Applying movement commands received from ROS
-- Reporting the drone's current position
+- Reporting the drone's current position and aligned RGB-depth camera observations
 - Measuring obstacle distances using Unity physics
 - Simulating the gripper and physical package attachment/release
 - Rendering the simulation
@@ -46,22 +49,34 @@ ROS and Unity communicate through Unity ROS-TCP-Connector and ROS-TCP-Endpoint.
 
 ```text
 DroneSortingProject/
+├── docs/                          # Context, next plan, and verification
 ├── ROS1/
 │   ├── scripts/
 │   │   ├── build_ros.sh
 │   │   ├── run_delivery_demo.sh
 │   │   ├── run_warehouse_ros_demo.sh
+│   │   ├── run_camera_delivery_demo.sh
+│   │   ├── prepare_camera_demo_ros.sh
+│   │   ├── start_camera_demo_ros.sh
 │   │   ├── sync_ros_workspace.sh
 │   │   ├── stop_demo.sh
 │   │   ├── watch_obstacles.sh
 │   │   ├── test_mission.sh
 │   │   └── test_full_mission.sh
 │   │
+│   ├── tools/                     # Restart lifecycle, RGB inference, and physical evaluation
 │   └── src/drone_sorting/
 │       ├── launch/
+│       │   ├── camera_validation.launch
+│       │   ├── package_perception.launch
+│       │   ├── camera_pickup.launch
+│       │   ├── camera_delivery.launch
 │       │   ├── drone_demo.launch
 │       │   └── warehouse_demo.launch
 │       ├── scripts/
+│       │   ├── camera_stream_check_node.py
+│       │   ├── package_perception_node.py
+│       │   ├── camera_pickup_node.py
 │       │   ├── delivery_demo_monitor.py
 │       │   ├── mission_manager_node.py
 │       │   └── motion_controller_node.py
@@ -71,9 +86,13 @@ DroneSortingProject/
 │           ├── interfaces/
 │           │   └── ros_topics.py
 │           ├── mission/
+│           │   ├── camera_pickup.py
+│           │   ├── pickup_guidance.py
+│           │   ├── delivery_guidance.py
 │           │   ├── mission_config.py
 │           │   ├── mission_manager.py
 │           │   └── mission_state.py
+│           ├── perception/        # Camera validation and package surface localization
 │           └── planning/
 │               └── obstacle_avoidance.py
 │
@@ -86,8 +105,10 @@ DroneSortingProject/
     │   │   ├── GripperController.cs
     │   │   └── PackageHandling.cs
     │   ├── Editor/
+    │   │   ├── CameraPickupTrial.cs
     │   │   ├── DeliveryDemoSceneLauncher.cs
     │   │   ├── WarehouseDroneAutoRunOnce.cs
+    │   │   ├── WarehouseSpectatorCameraVerification.cs
     │   │   └── WarehouseDroneIntegrator.cs
     │   ├── Prefabs/
     │   │   ├── Drone.prefab
@@ -103,10 +124,14 @@ DroneSortingProject/
     │       ├── DroneStatePublisher.cs
     │       ├── PackageActionBridge.cs
     │       ├── WarehouseRosRuntimeBootstrap.cs
+    │       ├── WarehouseSpectatorCamera.cs
     │       └── WarehouseRosSetup.cs
     ├── Packages/
     └── ProjectSettings/
 ```
+
+This tree highlights the delivery workflow. The complete sensor module map and
+responsibilities are in [project context](docs/project_context.md#module-responsibilities).
 
 ## Main Components
 
@@ -114,7 +139,9 @@ DroneSortingProject/
 
 #### Mission Manager
 
-`mission_manager.py` controls the high-level delivery mission:
+`mission_manager.py` controls the fixed-coordinate delivery demo. The camera
+workflow uses `camera_pickup.py` with `PickupGuidance` and, for delivery,
+`DeliveryGuidance`. The delivery workflows publish the same public mission sequence:
 
 ```text
 IDLE
@@ -130,7 +157,10 @@ WAIT_FOR_DROP
 COMPLETE
 ```
 
-It selects the active target, detects arrival using Unity position feedback, requests `PICKUP` or `DROP`, and waits for Unity to confirm completion.
+The active mission node selects targets, checks arrival using Unity position
+feedback, requests `PICKUP` or `DROP`, and waits for Unity acknowledgements. Camera
+guidance estimates the pickup target from RGB-depth observations; delivery uses a
+configured destination. Run one mission node at a time.
 
 `mission_config.py` contains default mission values. Scene-specific launch files can override pickup/drop-off coordinates and arrival tolerance.
 
@@ -141,8 +171,12 @@ It selects the active target, detects arrival using Unity position feedback, req
 - Mission target position
 - Current drone position from Unity
 - Obstacle distances from Unity
+- Command speed when dynamic-speed mode is enabled
 
-It calculates the next commanded position and publishes it to Unity. When obstacle avoidance is enabled, it uses the Obstacle Avoidance Planner before producing the next movement command.
+It calculates the next commanded position and publishes it to Unity. When
+obstacle avoidance is enabled, it uses the Obstacle Avoidance Planner before
+producing the next command. Camera launches enable dynamic speed and feedback
+timeouts; fixed-coordinate launches retain fixed-speed mode.
 
 #### Obstacle Avoidance Planner
 
@@ -177,6 +211,10 @@ Unity only measures obstacle distances. ROS decides how the drone reacts.
 
 - `drone_demo.launch` starts ROS-TCP-Endpoint, Mission Manager, and Motion Controller.
 - `warehouse_demo.launch` reuses the generic launch file with `MainWarehouse` pickup/drop-off coordinates and warehouse-specific settings.
+- `package_perception.launch` starts the endpoint and read-only RGB-depth package perception.
+- `camera_pickup.launch` adds camera-guided pickup and lift with slower dynamic-speed control.
+- `camera_delivery.launch` adds flight from `DroneStart` to observation, then pickup, carry, release, and settling hold.
+- `camera_validation.launch` starts only the endpoint and read-only camera checker, without a mission or motion controller. See [sensor verification](docs/verification.md#repeat-the-live-sensor-only-check).
 
 Warehouse obstacle avoidance is disabled by default until the warehouse sensor readings are validated.
 
@@ -187,9 +225,12 @@ Warehouse obstacle avoidance is disabled by default until the warehouse sensor r
 | `sync_ros_workspace.sh` | Copies the repository ROS package into the Catkin workspace |
 | `build_ros.sh` | Syncs and builds the ROS workspace |
 | `run_delivery_demo.sh` | Runs the smaller `SampleScene` integration demo |
-| `run_warehouse_ros_demo.sh` | Runs the complete `MainWarehouse` mission on Linux or WSL2 |
+| `run_warehouse_ros_demo.sh` | Runs the fixed-coordinate `MainWarehouse` delivery on Linux or WSL2 |
+| `run_camera_delivery_demo.sh` | Restarts the camera demo, prepares ROS/YOLO, opens `MainWarehouse`, and waits for manual Play |
+| `prepare_camera_demo_ros.sh` | Links and incrementally builds a dedicated Catkin workspace without replacing the existing package |
+| `start_camera_demo_ros.sh` | Starts ROS, checks node/endpoint readiness, monitors the mission, and cleans up its ROS processes |
 | `watch_obstacles.sh` | Displays Unity obstacle sensor readings |
-| `stop_demo.sh` | Stops the running ROS demo |
+| `stop_demo.sh` | Legacy fixed-demo cleanup; use the camera launcher’s Ctrl+C for scoped cleanup |
 | `test_mission.sh` / `test_full_mission.sh` | Mission testing helpers |
 
 ### Unity Components
@@ -276,18 +317,25 @@ Stores the Unity-side ROS topic names. The matching ROS constants are defined in
 
 `WarehouseRosRuntimeBootstrap.cs` applies this setup when `MainWarehouse` enters Play Mode.
 
+The setup also configures the mounted RGB-depth camera, its ROS publisher, and
+the independent wide spectator view through `WarehouseSpectatorCamera.cs`.
+Camera modules, settings, and message contracts are documented in
+[project context](docs/project_context.md#sensor-settings-and-contracts).
+
 #### Unity Editor Tools
 
 - `DeliveryDemoSceneLauncher.cs` opens `SampleScene` or `MainWarehouse` from helper scripts.
 - `WarehouseDroneIntegrator.cs` places the M2 drone/package system in the warehouse and applies the shared ROS setup.
 - `WarehouseDroneAutoRunOnce.cs` supports the warehouse editor integration workflow.
+- `CameraPickupTrial.cs` runs batch pickup/delivery trials and records physical evidence; temporary package poses and ground truth stay in evaluation.
+- `WarehouseSpectatorCameraVerification.cs` checks camera clearance and renders preview views without entering Play or saving scene changes.
 
 ## Current Data Flow
 
 ### Movement and sensing
 
 ```text
-Mission Manager
+ROS mission node
       │
       │ /drone/target_position
       ▼
@@ -308,7 +356,7 @@ ROS chooses the target and calculates the next movement command. Unity applies t
 ### Package handling
 
 ```text
-Mission Manager
+ROS mission node
       │
       │ /drone/package_action
       │ PICKUP / DROP
@@ -321,14 +369,14 @@ PackageHandling / Gripper
       │ /drone/package_action_status
       │ PICKUP_DONE / DROP_DONE
       ▼
-Mission Manager
+ROS mission node
 ```
 
 ### Main ROS Topics
 
 | Topic | Purpose |
 |---|---|
-| `/drone/target_position` | Current pickup or drop-off target selected by Mission Manager |
+| `/drone/target_position` | Current target selected by the active ROS mission node |
 | `/drone/current_position` | Current drone position reported by Unity |
 | `/drone/obstacle_distances` | Obstacle measurements reported by Unity |
 | `/drone/command_position` | Next movement position calculated by ROS |
@@ -336,20 +384,36 @@ Mission Manager
 | `/drone/mission_state` | Current delivery mission state |
 | `/drone/package_action` | `PICKUP` or `DROP` request from ROS |
 | `/drone/package_action_status` | `PICKUP_DONE` or `DROP_DONE` confirmation from Unity |
+| `/drone/package_candidates` | RGB-depth perception states, surface candidates, and accepted grasp centers |
+| `/drone/command_speed` | Optional dynamic speed in m/s; zero holds |
+| `/drone/pickup_trial_status` | Camera pickup/delivery phase, reason, target, speed, and timestamp |
+
+RGB-depth images, calibration, poses, and transforms are published separately;
+see [sensor topics and coordinate contracts](docs/project_context.md#sensor-settings-and-contracts).
 
 ## Workflow
 
-1. Mission Manager starts `GO_TO_PICKUP` and publishes the pickup target.
-2. Unity reports the drone position and obstacle measurements.
+Choose the fixed-coordinate warehouse launch, camera pickup-only launch, or camera
+delivery launch. Each uses one ROS mission node and the same Unity package bridge.
+The pickup-only workflow ends at step 7; steps 8–11 apply to delivery launches.
+
+1. The ROS mission node selects a pickup target. Camera guidance first requires
+   consistent RGB-depth observations from the observation waypoint. Camera delivery
+   first ascends from `DroneStart`, travels there, and holds for one second.
+2. Unity reports position, obstacle measurements, and enabled camera observations.
 3. Motion Controller calculates the next position and sends it to Unity.
-4. The ROS ↔ Unity control loop continues until the pickup target is reached.
-5. Mission Manager requests `PICKUP`.
-6. Unity performs the physical pickup and returns `PICKUP_DONE`.
-7. Mission Manager switches to `GO_TO_DROPOFF` and publishes the drop-off target.
-8. ROS controls the drone to the drop-off point.
-9. Mission Manager requests `DROP`.
+4. Camera guidance approaches, refines alignment, and descends; the fixed-coordinate
+   mission moves to its configured pickup target.
+5. The mission node requests `PICKUP` when the pickup target is reached.
+6. Unity attaches the package and returns `PICKUP_DONE` before lift or delivery begins.
+7. Camera pickup-only guidance lifts and holds. Camera delivery enters
+   `GO_TO_DROPOFF` after lift, then ascends to carry height; the fixed-coordinate
+   mission selects its drop-off target after acknowledgement.
+8. ROS controls travel to the destination. Camera delivery lowers vertically there.
+9. The mission node requests `DROP` at the release position.
 10. Unity releases the package and returns `DROP_DONE`.
-11. Mission Manager changes the mission state to `COMPLETE`.
+11. The mission node publishes `COMPLETE`; camera delivery first holds for settling.
+    Independent physical evaluation checks the final package placement.
 
 ## Installation
 
@@ -391,9 +455,11 @@ git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
 
 The helper scripts detect the repository location automatically, so the project does not need to be stored at `~/DroneSortingProject`.
 
-Build the ROS workspace:
+Return to the repository root and build the ROS workspace. In the sequence above,
+`cd -` returns from the Catkin workspace to the cloned repository:
 
 ```bash
+cd -
 bash ROS1/scripts/build_ros.sh
 ```
 
@@ -410,7 +476,10 @@ Edit → Project Settings → Player
 Active Input Handling: Both
 ```
 
-Run the warehouse mission without obstacle avoidance:
+For the RGB-depth/YOLO workflow, use the [one-command camera delivery launcher](#camera-guided-single-package-delivery). It requires the local detector environment
+and trained weights described there; these are not included in a fresh clone.
+
+Run the fixed-coordinate warehouse mission without obstacle avoidance:
 
 ```bash
 bash ROS1/scripts/run_warehouse_ros_demo.sh false
@@ -483,116 +552,241 @@ bash ROS1/scripts/run_warehouse_ros_demo.sh true
 
 ### Planned visual-search demo
 
-`MainWarehouse` contains three identical delivery-package prefab instances in
-the existing 5 × 5 m pickup area, centered at Unity X=34, Z=25. Package centers
-start at Unity (34.23, 0.44, 25.10), (32.70, 0.44, 23.70), and
-(35.30, 0.44, 26.30). These are scene-placement facts, not inputs to the planned
-ROS perception system.
+`MainWarehouse` contains three identical packages in the pickup area. The intended
+mission will locate packages from RGB-depth observations, deliver them one at a
+time, and return until repeated valid observations confirm the area is empty.
+Scene geometry and agreed decisions are in
+[project context](docs/project_context.md#agreed-visual-search-demo).
 
-The planned observation waypoint is directly above the pickup-area center:
-Unity (34, observation_height, 25), or ROS (34, 25, observation_height).
-Its height will be selected after checking camera coverage and warehouse clearance.
-ROS will know the area boundaries (Unity X=31.5–36.5, Z=22.5–27.5) and drop zone,
-but will discover package locations from RGB-depth observations.
+The mounted RGB-depth camera and live ROS sensor pipeline are implemented and
+verified. Simulated lens/range settings are provisional, and sensor verification
+does not establish flight safety or real-hardware readiness. See the
+[sensor contracts](docs/project_context.md#sensor-settings-and-contracts) and
+[completed checks](docs/verification.md).
 
-The planned mission observes the area, selects an accessible package, approaches
-and picks it up, delivers it to the drop zone, and returns to observe again.
-Completion requires repeated valid observations covering the pickup area with no
-remaining packages; a missed detection or camera failure must not count as empty.
-The three-package count is for demo evaluation, not a mission stopping condition.
-ROS will select separate release positions within the destination zone to avoid
-dropping subsequent packages onto previously delivered packages.
+RGB package detection uses an initial YOLO11 nano checkpoint. ROS estimates an
+upright package's grasp center from synchronized RGB-depth observations, then
+flies from `DroneStart` through observation hover, pickup, lift, carry, release,
+and settling hold. Baseline and changed-placement/rotation batch trials passed
+independent physical evaluation inside `SortingZoneA`; a manual GUI run also
+confirmed final placement. The latest ROS unit suite passed 69 tests. See
+[full-workflow evidence](docs/verification.md#full-workflow-from-dronestart).
 
-`MainWarehouse` now has a persistent `PackageRgbCamera` child on the delivery
-drone. `DroneRgbCamera` configures its local position `(0, -0.55, -0.60)` and
-rotation `(55, 0, 0)` degrees: 35 degrees from straight down toward the gripper.
-The provisional simulated lens is 800 × 600 with a 110-degree **vertical** field
-of view and 0.05–30 m clipping planes; these are not real sensor specifications
-or a validated depth range. The camera renders on demand, not to the spectator
-display. `WarehouseRosSetup` reuses this child rather than adding duplicates.
+The Linux camera launcher now restarts the previous demo's ROS, YOLO, and this
+project's Unity editor, opens `MainWarehouse`, and waits for manual Play. Fresh
+startup and replacement of an active run were tested. The wide spectator view
+passed rendered preview checks and a manual Play review. See the
+[run instructions](#camera-guided-single-package-delivery) and
+[launcher and spectator evidence](docs/verification.md#launcher-and-spectator-verification).
 
-To verify the installation, stop Play Mode and save existing edits, then use
-**Drone Delivery → Install and Verify Warehouse RGB Camera**. This checks the
-mount, duplicate prevention, and frustum coverage, renders observation/approach/
-open/closed-jaw views to the system temporary directory under
-`drone-permanent-rgb-verification/`, restores the drone and jaws, and saves the
-camera installation. The observation check uses drone root height 6 m; it checks
-coverage, not flight clearance. Inspect the images separately for occlusion.
+Five live fault trials verified holding without stage advancement under camera
+or detector loss, stale mission position feedback, and missing pickup/drop
+acknowledgements. Automatic mission recovery and return-and-repeat delivery are
+not implemented; warehouse avoidance remains unverified. Pickup-only retains
+its observation start, and the
+fixed-coordinate warehouse launch remains available. See the
+[milestone status and remaining work](docs/PLAN.md).
 
-The RGB mount and its four rendered views have been verified in Unity.
-`RgbDepthCapture` provides on-demand, aligned RGB and floating-point depth from
-the same HDRP camera render. Arrays use top-left origin; RGB is packed RGB bytes,
-and depth is optical-axis distance in metres with `NaN` for missing/out-of-range
-measurements. The provisional capture range is 0.2–15 m. Opaque depth-writing
-surfaces are supported; transparent surfaces without depth writes are not.
+A small editor-only dataset pilot is available through **Drone Delivery → Export
+Package Dataset Pilot**. It exports 16 RGB views, YOLO labels for class `0: package`,
+visibility masks, and box previews, using temporary scene changes without saving.
+This verifies the capture/label process; it is not a full training or evaluation
+dataset. See [pilot reproduction and checks](docs/verification.md#package-dataset-pilot).
 
-Use **Drone Delivery → Verify Warehouse RGB Depth Capture** with MainWarehouse
-open and Play Mode stopped. It tests known-distance colored probes, off-axis
-depth, RGB/depth row alignment, missing depth, range filtering, and repeated
-warehouse/gripper capture. Temporary objects and drone/jaw poses are restored;
-the scene is not saved. Images and a report go to the temporary directory under
-`drone-rgb-depth-verification/`. These checks passed; five warmed observation
-captures averaged 64.8 ms each in the editor, not a runtime throughput guarantee.
+**Drone Delivery → Export Package Training Trial** extends this to 200 RGB
+images split by package configuration (140 training, 30 validation, 30 test).
+Offline training/evaluation tools are under `ROS1/tools/`. The first trained
+checkpoint and measured results are local artifacts; see
+[training trial results and reproduction](docs/verification.md#package-detector-training-trial).
 
-`DroneCameraPublisher` is configured by the warehouse runtime setup. It starts
-with 2 captures per second, queue size 1, and no catch-up bursts; capture pauses
-when the ROS connection is unavailable. Unity compilation and message/coordinate
-checks passed, including arbitrary drone rotation and TF composition. ROS Noetic
-also independently decoded all six saved Unity message types and checked their
-metadata, depth values, calibration, and TF translation. The sensor-only live
-test passed: ROS received five synchronized 800 × 600 observations at roughly
-2 FPS, with valid encodings, layouts, calibration, poses, and acquisition times.
-A separate live check confirmed that `warehouse → drone_base →
-package_camera_optical` agrees with the stamped camera pose, drone position,
-and optical axes.
-No mission or motion controller ran during these checks; they establish sensor
-communication, not package recognition, navigation, or real-hardware readiness.
-Synchronous readback
-can stall rendering, so the editor measurement does not justify higher rates.
-Restart Play Mode after changing capture dimensions or depth limits.
+### Stationary package perception
 
-| Topic | Message / meaning |
-| --- | --- |
-| `/drone/camera/rgb/image_raw` | `sensor_msgs/Image`, `rgb8`, top-down packed rows |
-| `/drone/camera/depth/image_raw` | `sensor_msgs/Image`, `32FC1`, optical-axis metres, invalid `NaN` |
-| `/drone/camera/camera_info` | `sensor_msgs/CameraInfo`, ideal pinhole intrinsics, zero distortion |
-| `/drone/camera/pose` | `geometry_msgs/PoseStamped`, optical camera pose in `warehouse` |
-| `/drone/current_pose` | `geometry_msgs/PoseStamped`, drone body pose in `warehouse` |
-| `/tf` | `tf2_msgs/TFMessage`, `warehouse → drone_base → package_camera_optical` |
+Start the RGB-only worker in the isolated Python 3.11 detector environment. Local
+single-class `package` weights are required; startup never downloads a model.
+The current local environment and checkpoint are ignored build artifacts:
 
-Each observation's messages share a sequence and UTC acquisition timestamp;
-use ROS wall time (`use_sim_time=false`), with synchronized clocks if separate
-computers are used. Existing `/drone/current_position` is unchanged. World
-positions retain Unity `(x,y,z)` → ROS `(x,z,y)`. Drone body axes are forward,
-left, up; optical axes are right, down, forward. Rotations are converted using
-these bases, not by swapping quaternion components. The calibration is for the
-undistorted simulated lens, not measured real-camera calibration.
+```bash
+ROS1/build/yolo-feasibility/venv/bin/python ROS1/tools/package_detector_service.py \
+  --weights ROS1/build/package-training-trial/training/weights/best.pt \
+  --device 0 --confidence 0.25 --image-size 640
+```
 
-After building the ROS package, run `roslaunch drone_sorting camera_validation.launch`
-in the ROS environment, then start MainWarehouse Play Mode. This starts only the
-TCP endpoint and read-only sensor checker, not mission or motion nodes. Do not
-run it alongside another endpoint on port 10000. Use `required_frames:=5` for a
-finite checker; stop the launch afterward because the endpoint remains running.
-The checker validates synchronized images, calibration, pose, data layouts, and
-freshness; it does not prove detection accuracy or flight safety.
+In a built/sourced ROS workspace containing this package and ROS-TCP-Endpoint, run
+`roslaunch drone_sorting package_perception.launch`. It starts the endpoint on
+10000 and connects to the loopback worker on 10001 (`detector_port` launch argument).
+It starts no mission or movement controller. Start MainWarehouse Play Mode with
+the drone positioned for observation; this launch does not fly it there. Do not
+start a delivery launch concurrently. Keep Unity focused as required for capture.
 
-Focused Python checks:
-`PYTHONPATH=ROS1/src/drone_sorting/src python3 -m unittest discover -s ROS1/src/drone_sorting/tests -v`.
-Run in ROS Noetic for all 15 tests; the seven ROS-message contract tests are
-skipped without ROS dependencies. Unity message formatting and transform checks
-are available through **Drone Delivery → Verify Camera ROS Messages**.
-To independently decode that verifier's binary fixtures in ROS Noetic, run
-`PYTHONPATH=ROS1/src/drone_sorting/src python3 ROS1/src/drone_sorting/tests/verify_unity_camera_messages.py <fixture_directory>`.
-The default fixture directory is the system temporary directory under
-`drone-camera-message-verification/`; copy fixtures when ROS runs in a container
-with a separate temporary filesystem.
-With the sensor-only launch and Unity Play Mode running, check live pose/TF
-consistency using
-`PYTHONPATH=ROS1/src/drone_sorting/src python3 ROS1/src/drone_sorting/tests/verify_live_camera_transforms.py`.
-It waits up to 15 seconds for a synchronized observation and sends no commands.
+`/drone/package_candidates` is `std_msgs/String` containing JSON with schema version
+1, acquisition stamp/sequence, `warehouse` frame, state, candidates, and rejection
+reasons. States are `DETECTIONS`, `NO_DETECTIONS`, `UNRELIABLE`, and `UNAVAILABLE`.
+Candidates contain confidence, image bounding box/pixel, supported sample count,
+and a position in ROS `(x,y,z)` metres, equivalent to Unity `(x,z,y)`.
+The `position` is an observed **visible surface**, not a package center. A separate
+`grasp` result reports whether an upright-box center estimate passed its checks;
+camera guidance uses that accepted center for alignment.
 
-Camera perception and repeated delivery are not implemented yet. The existing
-warehouse launch still performs its single delivery using fixed pickup coordinates.
+Four sensor messages are synchronized exactly; identity, geometry, and freshness
+are checked before and after inference. The latest observation replaces pending
+work, with a 1.5 second age limit. Missing data or a failed worker never reports
+an empty area. `NO_DETECTIONS` alone also does not prove area emptiness.
+Depth filtering uses the demo's known pickup bounds (ROS X 31.5–36.5, Y 22.5–27.5)
+and surface heights Z 0.2–1.2 m. These private node parameters are `pickup_bounds`
+and `surface_height_range`; the assumptions suit this simulation's 0.6 m packages.
+Inset depth sampling is not general object segmentation.
+
+See [live trial evidence and reproduction](docs/verification.md#stationary-live-package-perception).
+
+### Camera-guided pickup: baseline verified
+
+`camera_pickup.launch` connects RGB-depth package perception, a one-package
+guidance node, and the existing motion controller. It expects the robot to begin
+at the tested observation point (ROS `(34, 25, 6)`, Unity `(34, 6, 25)`) in a clear,
+controlled test area. It moves toward the grasp center derived from an upright
+0.6 m square box top, descends, requests one pickup, and lifts after Unity confirms
+`PICKUP_DONE`. It ends after lift; `camera_delivery.launch` adds access from `DroneStart` and continues to the final
+zone. The existing warehouse demo remains a separate fixed-coordinate workflow.
+
+Trial speeds default to 0.5 m/s approach, 0.2 m/s descent, and 0.3 m/s lift,
+with 0.03 m arrival tolerance. The guidance node's private parameters configure
+these values; positive speeds must stay within the controller's 0.5 m/s cap.
+Zero `/drone/command_speed` means hold by sending no further position commands.
+The trial controller waits for a speed input and stops sending commands if position,
+target, or speed feedback is older than 0.5 seconds. The fixed-coordinate launch
+keeps dynamic speed disabled and defaults to 2 m/s.
+
+One baseline run passed with ROS Noetic and batch Unity, using the same trained
+checkpoint and an additional RGB inference view (`--context-scale 1.5` on the
+detector worker). This view pads the image to make close packages smaller during
+inference, then maps detections back to the original sensor pixels. The normal
+inference pass is retained; depth/calibration and the 0.25 confidence threshold
+are unchanged. The option defaults to 1 (no additional pass). The pickup-only
+result is recorded in
+[baseline evidence](docs/verification.md#automated-baseline-pickup-and-lift); later
+full-delivery results are described below.
+
+An editor-only physical evaluator, read-only ROS recorder, and offline evidence
+checker record and judge each trial. They require the selected package to
+attach and rise with the drone after `PICKUP_DONE`; `VERIFIED` alone cannot pass.
+See [evaluator checks and trial preparation](docs/verification.md#physical-pickup-evaluator)
+for recording, batch Unity startup, and evaluation commands.
+
+### Camera-guided single-package delivery
+
+`camera_delivery.launch` now starts from `DroneStart` (Unity `(34, 2, 10)`,
+ROS `(34, 10, 2)`). It ascends vertically to root height 6 m, travels to the
+observation point (Unity `(34, 6, 25)`, ROS `(34, 25, 6)`), and holds within the
+arrival tolerance for one continuous second. It ignores package candidates during
+access and requires new images acquired after that hover before selecting a package.
+ROS remains the sole movement authority. It then reuses camera pickup and continues
+after lift: ascend vertically, carry above `SortingZoneA`, lower, request release, wait
+for `DROP_DONE`, then hold for settling. Baseline and changed-placement/rotation
+batch Unity deliveries from `DroneStart` passed independent physical evaluation.
+See [full-workflow evidence](docs/verification.md#full-workflow-from-dronestart).
+Pickup coordinates come from RGB-depth observations; the observation waypoint,
+destination, and travel heights are configured.
+
+```bash
+# One-command host Linux startup; wait for READY, then press Play in Unity:
+bash ROS1/scripts/run_camera_delivery_demo.sh
+
+# In the sourced ROS environment, with the detector running and Unity at DroneStart:
+roslaunch drone_sorting camera_delivery.launch
+```
+
+Each invocation first stops this project's previous camera demo ROS/build
+processes (including Distrobox), YOLO worker, and Unity editor/import workers.
+It then incrementally builds the dedicated linked catkin workspace, starts fresh
+YOLO and ROS services, and reopens `MainWarehouse` with Play Mode off. Save Unity
+edits before running: a restart closes this project's editor, including an editor
+opened manually. The old `--reuse-editor` option is no longer supported.
+
+Keep the terminal open to see mission progress. Ctrl+C stops this run's ROS and
+detector while leaving Unity open; the next invocation closes that editor and
+starts fresh automatically. Cleanup identifies processes through project paths,
+per-run arguments/environment, and recorded systemd scopes. It preserves editors
+for other projects and untracked services. If an unrelated service occupies
+11311, 10000, or 10001, startup reports the conflict rather than terminating it.
+Concurrent restarts are refused until the current startup reaches READY. Logs
+from previous runs are retained. Unity recovery scenes left by shutdown are moved
+to the new run's `unity-scene-backups/` directory, so the saved scene opens without
+a backup-recovery prompt; those backups remain available for recovery.
+
+The terminal reports perception states and rejection reasons. On mission failure,
+the drone guidance holds and ROS stays available for inspection until Ctrl+C;
+failure does not count as a completed delivery. ROS also stays connected after
+successful completion until Ctrl+C, avoiding reconnection errors in Unity.
+
+Warehouse Play Mode uses a wide spectator view in the central aisle. In Unity
+coordinates the preferred camera stays at X=34 m and Y=6.5 m, follows 8 m ahead
+along Z, and stops at Z=50 m before the far-end overhang. It frames the drone and
+ground beneath it, with Cinemachine deocclusion for colliders. This view is
+independent of the mounted RGB-depth camera.
+
+With MainWarehouse open and Play stopped, **Drone Delivery → Verify Warehouse
+Spectator Clearance** checks 105 route positions and renders six previews into
+`ROS1/build/spectator-views/`. It also runs after script compilation and restores
+the drone's original pose without saving. Rendered images must be reviewed because
+collider checks cannot detect every visual obstruction. Diagnostic requests and
+verification results are in [launcher and spectator verification](docs/verification.md#launcher-and-spectator-verification).
+
+This launcher requires native Linux with a systemd user manager and either
+native ROS Noetic or the `ros-noetic` Distrobox container. It uses the installed
+Unity `6000.6.0f1`, the local detector environment and trained weights described
+above, and `~/drone_sorting_ros1_ws/src/ROS-TCP-Endpoint`. Override paths with
+`UNITY_EDITOR`, `DETECTOR_PYTHON`, `DETECTOR_WEIGHTS`, or
+`ROS_TCP_ENDPOINT_SOURCE`; select a container with `ROS_CONTAINER` or a separate
+build workspace with `CAMERA_DEMO_WORKSPACE`. The helpers are
+`prepare_camera_demo_ros.sh` (non-destructive source links and build) and
+`start_camera_demo_ros.sh` (ROS readiness, monitoring, and cleanup). The host
+`ROS1/tools/camera_demo_processes.py` helper owns restart process identification
+and shutdown.
+
+Host demo processes run in a separate systemd scope capped at 8 GiB RAM and 2 GiB
+swap, so they do not share Codex's application memory group. Builds use two
+jobs and Unity uses four job workers. ROS inside Distrobox remains in the
+container's own resource group. Each run retains build, detector, ROS, monitor,
+and Unity logs, the scope name, and helper snapshots under
+`ROS1/build/camera-demo-<timestamp>-<id>/`. These limits contain host memory usage;
+they do not guarantee sufficient memory on every machine. See the
+[GUI run evidence and limitations](docs/verification.md#launcher-and-spectator-verification).
+
+Use the same detector with `--context-scale 1.5` and read-only recorder as the
+pickup trial. Set `DRONE_PICKUP_TRIAL_MISSION=delivery` when starting
+`CameraPickupTrial.Run`; the delivery capture limit is 330 s. Delivery trials now
+initialize at `DroneStart`.
+To reproduce earlier observation-only deliveries, pair launch argument
+`start_from_drone_start:=false` with harness environment
+`DRONE_PICKUP_TRIAL_START=observation`. Pickup-only trials remain unchanged. Use a
+fresh output for every run and confirm previous control publishers have stopped. The
+[trial procedure and delivery evidence](docs/verification.md#camera-guided-single-package-delivery)
+cover batch startup, recording, and evaluation. `camera_pickup.launch` continues
+to end after lift; `warehouse_demo.launch` retains the fixed-coordinate demo.
+
+Scene-specific parameters are in `camera_pickup.launch`, shared by the delivery
+launch. ROS X/Y are horizontal; ROS Z is vertical, and heights refer to drone root:
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `observation_x`, `observation_y`, `observation_height` | 34, 25, 6 m | Observation hover target |
+| `access_speed`, `access_timeout` | 0.5 m/s, 60 s | Speed and timeout for each access stage |
+| `hover_time` | 1 s | Continuous arrival tolerance before visual selection |
+| `dropoff_x`, `dropoff_y` | 28, 55 m | Destination center |
+| `carry_height` | 6 m | Vertical ascent and horizontal transport height |
+| `release_height` | 1.4 m | Root height for release, accounting for the 0.95 m mount offset |
+| `carry_speed`, `lowering_speed` | 0.5, 0.2 m/s | Transport and destination descent |
+| `travel_timeout`, `drop_timeout` | 120, 5 s | Each transport stage and release acknowledgement wait |
+| `settle_time` | 2 s | Hold after acknowledgement before `COMPLETE` |
+
+Delivery uses the existing public mission sequence through `GO_TO_DROPOFF`,
+`WAIT_FOR_DROP`, and `COMPLETE`, with ROS as the sole movement authority.
+`DROP_DONE` confirms release; `COMPLETE` alone does not prove successful placement.
+The physical checker requires continuous attachment during carry, ordered
+acknowledgements, final detachment, and the whole package footprint settling
+inside the zone. It also checks sampled collider penetration and hold drift.
+Avoidance remains disabled; the configured route was checked against active
+scene colliders, not established as a general navigation solution.
 
 ### Working
 
@@ -601,16 +795,23 @@ warehouse launch still performs its single delivery using fixed pickup coordinat
 - ROS-controlled drone movement
 - Unity position feedback
 - Unity obstacle sensing
+- Mounted RGB-depth sensing and synchronized ROS image/calibration/pose publishing
+- Sensor-only ROS validation, camera geometry tests, and live camera transform checks
+- Offline package dataset export and initial YOLO11 nano fine-tuning/evaluation
+- Stationary ROS package candidates from synchronized RGB-depth observations
+- Camera-guided one-package delivery from `DroneStart`, with batch physical evaluation and manual GUI placement confirmation
+- One-command Linux startup with scoped fresh restart, readiness checks, monitoring, and per-run logs
+- Wide warehouse spectator view, with preview and manual Play checks
 - Physical gripper and package attachment/release
-- Automatic pickup and drop-off target switching
-- End-to-end `MainWarehouse` delivery with ROS controlling the mission and movement
+- Fixed-coordinate `MainWarehouse` delivery with ROS controlling the mission and movement
 - Static obstacle avoidance validated in `SampleScene`
 - Climb, descend, pass, and side-step avoidance logic
 
 ### Next
 
+- Define recovery after missing acknowledgements or observation/feedback loss
+- Extend fault validation to other timing, combined failures, and broader layouts
+- Implement return-and-repeat search with reliable empty-area confirmation and separate release positions
 - Validate obstacle sensor readings in `MainWarehouse`
 - Enable and tune static obstacle avoidance in `MainWarehouse`
-- Improve sensing where needed
-- Add dynamic obstacle avoidance
-- Final warehouse and system polish
+- Validate broader sensing conditions and dynamic obstacles
