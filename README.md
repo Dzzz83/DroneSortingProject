@@ -558,6 +558,9 @@ A separately approved 7 GiB diagnostic budget is available with
 available host RAM (the cap plus 2 GiB headroom). The default remains 5 GiB, with
 7 GiB initial headroom; swap remains capped at 512 MiB for either budget. Only
 these two experimental budgets are accepted; neither is a measured requirement.
+The controlled 7 GiB import also ended in cgroup OOM before scene readiness.
+Current main uses an 8 GiB RAM / 2 GiB swap budget for the camera launcher, without
+a free-RAM threshold or separate import gate; see [the comparison](docs/verification.md#comparison-with-current-main).
 
 Every import now writes `scope-memory.jsonl` alongside host readings in
 `memory.log`. Scope samples contain memory and swap usage, available peak

@@ -982,7 +982,7 @@ and `kernel-oom.log`. The disposable Unity source/cache copy was removed after
 process shutdown; both original checkouts were preserved. A further live test
 requires a separate decision on the import workload or resource budget.
 
-### Preparing the 7 GiB comparison
+### 7 GiB comparison
 
 The user authorized one 7 GiB RAM trial without a soft limit, retaining the
 512 MiB swap cap, pressure shutdown, and timeout. `UNITY_IMPORT_RAM_GIB=7` selects
@@ -994,6 +994,51 @@ A new isolated copy without `Library` was prepared under ignored
 available and refused startup; no application was closed by the script. The
 lightweight suite ran 83 tests with two ROS-only skips; shell syntax and
 whitespace checks passed.
+
+Preflight subsequently passed with 9.6 GiB available RAM. One approved import ran
+on 2026-10-16 from 20:38:47 until the kernel killed Unity at 20:43:32; scope shutdown
+finished at 20:43:42. The hard cap was 7 GiB, swap remained 512 MiB, and
+`memory.high=max`. No automatic retry or limit increase occurred.
+
+- Sampled peak scope RAM: 7.00 GiB; peak swap: 512 MiB.
+- Lowest sampled host available RAM: 3.28 GiB; highest full host pressure `avg10`:
+  4.78%, below the monitor's 10% threshold.
+- The final scope sample recorded 28,785 `max` events, zero `high` events,
+  one OOM event and one OOM kill. The kernel confirmed `CONSTRAINT_MEMCG` and
+  killed the main Unity process. The final log was in texture compression.
+- Scene readiness and complete import were not confirmed; no `COMPLETE` marker
+  was written. The script exited unsuccessfully and all scope processes exited.
+- The queried journal window contained no other OOM victims. This does not prove
+  there was no slowdown for other applications.
+
+Logs and the scoped kernel/user journal excerpts remain under
+`ROS1/build/import-limit-comparison-7g/ROS1/build/unity-import-swRXHC/`. The failed
+trial's disposable Unity source/cache copy was removed; original checkouts were
+preserved. Normal demo startup and delivery were not attempted.
+
+### Comparison with current main
+
+During the trial, the user asked to compare the scripts that had worked on main.
+The local `main` ref was stale at `4625497`; GitHub main was fetched without
+switching or merging branches and resolved to `815d9ab1572d2cc20881191c285bb1c0063922d0`
+(merge of `camera_drone`). This current main **does include** the camera launcher;
+the earlier local-ref comparison that found no camera launcher was outdated.
+
+The camera launcher on current main applies `MemoryMax=8G` and `MemorySwapMax=2G`,
+starts the host GPU detector by default, and opens Unity directly. It has no
+minimum-free-RAM requirement and no prerequisite import-completion/cache gate.
+The warehouse launcher on main does not impose a memory scope at all. The Unity
+asset and script trees and project settings match the portability branch; only
+the connector revision in manifest/lock files is pinned here.
+
+The 5/7 GiB import budgets, 512 MiB swap cap, initial headroom requirements,
+separate preparation command and mandatory cache gate were added during this
+portability work. They are stricter experimental constraints, not measured demo
+hardware requirements. The 7 GiB cgroup failure confirms this experiment's cap
+was hit; it does not contradict the user's successful normal runs on main's
+larger budget or establish a new host-RAM requirement. A revision toward main's
+working startup flow, with diagnostics optional, should be discussed before any
+further live run.
 
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default
