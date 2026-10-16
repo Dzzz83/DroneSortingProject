@@ -64,5 +64,4 @@ PYTHON
 RUN_DIR="$(mktemp -d "$PROJECT_ROOT/ROS1/build/setup-camera-XXXXXX")"
 trap 'rm -rf "$RUN_DIR"' EXIT
 "${ROS_RUNNER[@]}" "$SCRIPT_DIR/prepare_camera_demo_ros.sh" "$PROJECT_ROOT" "$WORKSPACE" "$ENDPOINT_SOURCE" "$RUN_DIR" 8>&- 9>&-
-echo '[OK] Setup complete. Prepare Unity once: bash ROS1/scripts/prepare_camera_demo_unity.sh'
-echo 'Then run: bash ROS1/scripts/run_camera_delivery_demo.sh'
+echo '[OK] Setup complete. Run: bash ROS1/scripts/run_camera_delivery_demo.sh'

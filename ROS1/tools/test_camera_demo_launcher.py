@@ -18,7 +18,7 @@ class CameraLauncherTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('always restarts the demo', result.stderr)
 
-    def run_launcher(self, with_cache=True, **overrides):
+    def run_launcher(self, with_cache=True, failed_import=False, stop_at_restart=False, **overrides):
         environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true',
                            CAMERA_DEMO_MEMORY_MODE='off', CAMERA_DEMO_MIN_AVAILABLE_GIB='0.01')
         environment.update(overrides)
@@ -35,8 +35,13 @@ class CameraLauncherTests(unittest.TestCase):
                     cache.touch()
             tools = project / 'ROS1/tools'
             tools.mkdir(parents=True)
-            (tools / 'camera_demo_processes.py').write_text(
-                (ROOT / 'ROS1/tools/camera_demo_processes.py').read_text())
+            if failed_import:
+                (project / 'ROS1/build/unity-import-stopped').mkdir(parents=True)
+            restart_source = (ROOT / 'ROS1/tools/camera_demo_processes.py').read_text()
+            if stop_at_restart:
+                # Stop before any services start; only exercise startup admission.
+                restart_source = 'raise SystemExit(73)\n'
+            (tools / 'camera_demo_processes.py').write_text(restart_source)
             environment['PROJECT_ROOT'] = temporary
             return subprocess.run(['bash', str(LAUNCHER)], env=environment,
                                   capture_output=True, text=True, timeout=20)
@@ -60,12 +65,16 @@ class CameraLauncherTests(unittest.TestCase):
             self.assertIn('Close memory-heavy applications', result.stderr)
             self.assertNotIn('[RESTART]', result.stdout)
 
-    def test_fresh_checkout_refuses_before_restarting_processes(self):
+    def test_fresh_and_interrupted_imports_do_not_block_normal_startup(self):
         with tempfile.NamedTemporaryFile() as weights:
-            result = self.run_launcher(with_cache=False, DETECTOR_WEIGHTS=weights.name)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('prepare_camera_demo_unity.sh', result.stderr)
-            self.assertNotIn('[RESTART]', result.stdout)
+            for with_cache, failed_import in ((False, False), (True, True)):
+                with self.subTest(with_cache=with_cache, failed_import=failed_import):
+                    result = self.run_launcher(
+                        with_cache=with_cache, failed_import=failed_import, stop_at_restart=True,
+                        DETECTOR_WEIGHTS=weights.name, CAMERA_DEMO_MIN_AVAILABLE_GIB='')
+                    self.assertEqual(result.returncode, 73, result.stderr)
+                    self.assertIn('[RESTART]', result.stdout)
+                    self.assertNotIn('prepare_camera_demo_unity.sh', result.stderr)
 
     def test_memory_modes_without_systemd_user_manager(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -81,6 +90,30 @@ class CameraLauncherTests(unittest.TestCase):
                         env=dict(os.environ, CAMERA_DEMO_MEMORY_MODE=mode, CAMERA_DEMO_SCOPE=''),
                         capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode == 0, succeeds, result.stderr)
+
+    def test_normal_scope_keeps_main_memory_and_swap_limits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'camera_demo_linux.sh').write_text((ROOT / 'ROS1/scripts/camera_demo_linux.sh').read_text())
+            definitions = root / 'launcher-functions.sh'
+            definitions.write_text(LAUNCHER.read_text().split('\ncheck_dependencies "$@"', 1)[0])
+            arguments = root / 'scope-arguments'
+            command = '''source "$1"
+systemctl() { return 0; }
+systemd-run() { printf '%s\\n' "$@" > "$TEST_SCOPE_ARGUMENTS"; }
+isolate_demo_processes
+'''
+            result = subprocess.run(
+                ['bash', '-c', command, 'bash', str(definitions)],
+                env=dict(os.environ, CAMERA_DEMO_MEMORY_MODE='required', CAMERA_DEMO_SCOPE='',
+                         CAMERA_DEMO_MEMORY_MAX='', CAMERA_DEMO_SWAP_MAX='',
+                         TEST_SCOPE_ARGUMENTS=str(arguments)),
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            settings = arguments.read_text().splitlines()
+            self.assertIn('--property=MemoryMax=8G', settings)
+            self.assertIn('--property=MemorySwapMax=2G', settings)
+            self.assertFalse(any('MemoryHigh=' in setting for setting in settings))
 
     def test_manual_unity_does_not_start_editor(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -124,8 +157,9 @@ class CameraLauncherTests(unittest.TestCase):
             editor.write_text('''#!/usr/bin/env python3
 import pathlib, sys, time
 log = pathlib.Path(sys.argv[sys.argv.index('-logFile') + 1])
-assert sys.argv[sys.argv.index('-refreshImportMode') + 1] == 'InProcess'
-assert sys.argv[sys.argv.index('-job-worker-count') + 1] == '2'
+assert '-refreshImportMode' not in sys.argv
+assert '-gc-helper-count' not in sys.argv
+assert sys.argv[sys.argv.index('-job-worker-count') + 1] == '4'
 log.write_text('Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity\\n')
 time.sleep(30)
 ''')

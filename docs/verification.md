@@ -814,6 +814,12 @@ rendered previews but absent from the collider results.
 
 ## Linux portability verification
 
+Current normal startup opens Unity directly with main's 8 GiB RAM / 2 GiB swap
+budget, without a default free-RAM threshold or import/cache gate. The stricter
+import experiments below are optional diagnostics and historical evidence, not
+normal setup requirements. See [normal startup restored](#normal-startup-restored)
+for the latest policy and checks.
+
 The `feat/linux-portable-setup` changes package the existing checkpoint and pin
 host Python dependencies, ROS-TCP-Endpoint, and the Unity ROS connector. Checks on
 the x86-64 CachyOS host with the existing Ubuntu 20.04 Noetic Distrobox found:
@@ -861,11 +867,12 @@ of these files. This establishes different cache states, but does not measure
 the RAM required for either workload. No cache was deleted or copied between
 checkouts.
 
-Normal startup now reports memory, warns below a provisional 4 GiB, and enforces
-a hard minimum only when `CAMERA_DEMO_MIN_AVAILABLE_GIB` is explicitly set. A
+At this intermediate stage, normal startup reported memory, warned below a
+provisional 4 GiB, and enforced a hard minimum only when `CAMERA_DEMO_MIN_AVAILABLE_GIB` is explicitly set. A
 missing/incomplete cache directs automatic startup to `prepare_camera_demo_unity.sh`
-before project processes are stopped. Manual backend-only startup still works
-without a cache. Cache files are indicators, not proof that no reimport is needed.
+before project processes were stopped. Manual backend-only startup still worked
+without a cache. This admission policy was later removed from normal startup.
+Cache files are indicators, not proof that no reimport is needed.
 
 The new import helper runs Unity alone with sequential imports, two job workers,
 one GC helper, and a ten-minute maximum. Its provisional experiment budget is
@@ -1036,9 +1043,33 @@ separate preparation command and mandatory cache gate were added during this
 portability work. They are stricter experimental constraints, not measured demo
 hardware requirements. The 7 GiB cgroup failure confirms this experiment's cap
 was hit; it does not contradict the user's successful normal runs on main's
-larger budget or establish a new host-RAM requirement. A revision toward main's
-working startup flow, with diagnostics optional, should be discussed before any
-further live run.
+larger budget or establish a new host-RAM requirement. Normal startup was
+subsequently restored toward main's flow, as recorded below.
+
+### Normal startup restored
+
+The normal camera launcher now opens Unity directly, including fresh checkouts
+and projects with interrupted diagnostic imports. It no longer invokes the
+cache-completion diagnostic or imposes a default available-RAM threshold.
+`CAMERA_DEMO_MIN_AVAILABLE_GIB` still enforces a minimum only when explicitly set.
+The normal systemd scope keeps main's `MemoryMax=8G` / `MemorySwapMax=2G`, without
+a soft limit. Unity uses main's four job workers without forced import mode or
+GC helper settings. The configurable scene readiness timeout remains 600 seconds
+to allow more time for fresh imports than main's fixed 180 seconds.
+
+The included model, pinned dependencies, setup command, portable path discovery,
+CPU/GPU options, native/Distrobox selection, and manual Unity mode remain. Setup
+now prints the normal launcher command; the README's fresh-clone sequence no
+longer includes the optional import diagnostic.
+
+Lightweight tests exercise fresh and interrupted-import startup through a fake
+restart boundary, verify the default 8 GiB / 2 GiB scope settings, capture the
+restored arguments with a fake editor, and check that an explicit minimum still
+refuses startup before project cleanup. The full host tool suite ran 84 tests,
+with two ROS-only skips. Shell syntax and diff whitespace checks passed.
+No real Unity, ROS mission, or detector was launched for this change; a fresh
+end-to-end run under the restored policy remains unverified. Earlier failed
+strict-budget experiments do not validate or invalidate that restored workflow.
 
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default

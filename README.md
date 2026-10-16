@@ -486,11 +486,8 @@ model is included in Git; setup installs dependencies without training.
 The initial portability target is **x86-64 host Linux**, Unity `6000.6.0f1`,
 Python **3.11** with `venv`/`pip`, Git/Git LFS, and either native ROS Noetic or
 Distrobox with an Ubuntu 20.04 Noetic container. The host also needs a working
-Unity graphics environment and OpenCV's `libGL`/GLib libraries. First-time Unity
-import is separate from normal startup; the bounded import helper requires a
-systemd user manager, Linux memory pressure reporting, and initially 7 GiB of
-available RAM. This is a provisional test budget, not a measured hardware
-requirement. Install these prerequisites through your distribution; setup does not install system packages
+Unity graphics environment and OpenCV's `libGL`/GLib libraries. Install these
+prerequisites through your distribution; setup does not install system packages
 or Unity. Ubuntu 20.04's default Python 3.8 is for ROS; install Python 3.11
 separately on the host for the detector. Set `DETECTOR_SETUP_PYTHON` if its binary
 is not named `python3.11`.
@@ -520,7 +517,6 @@ git clone https://github.com/Dzzz83/DroneSortingProject.git
 cd DroneSortingProject
 git lfs pull
 bash ROS1/scripts/setup_camera_demo_linux.sh
-bash ROS1/scripts/prepare_camera_demo_unity.sh
 bash ROS1/scripts/run_camera_delivery_demo.sh
 ```
 
@@ -533,54 +529,31 @@ packages or change an existing Endpoint checkout. Stop the launcher before
 rerunning setup. Internet access is needed for the first dependency installation.
 Generated dependencies stay under ignored `ROS1/build/`.
 
-Prepare Unity once before the first automatic demo launch. The helper starts only
-Unity in batch mode, imports assets sequentially, compiles scripts, opens the
-warehouse scene, and exits. It never starts ROS or YOLO or closes another editor.
-It uses a systemd scope with `MemoryHigh=4G`, `MemoryMax=5G`, and
-`MemorySwapMax=512M`. It samples host available RAM and memory pressure each
-second, stopping after five consecutive checks below 2 GiB available RAM or at
-least 10% full-memory-stall pressure (`avg10`), or after 600 seconds. The scope also has an independent systemd runtime limit. Set
-`UNITY_IMPORT_TIMEOUT` from 1 to 600 seconds to shorten this limit. Logs, scope
-memory samples, and pressure readings stay under `ROS1/build/unity-import-*/`.
-These limits may stop an import before it finishes; they are not a guarantee
-against disruption. The controlled real import stopped on memory-stall pressure
-before scene readiness; see [measured results](docs/verification.md#controlled-import-result).
+The normal launcher opens Unity directly, including on a fresh checkout. Unity
+imports assets as needed. No separate preparation command, cache-completion
+marker, or minimum-free-RAM threshold is required. With systemd available, the
+normal scope retains main's 8 GiB RAM / 2 GiB swap limits. These are caps, not
+memory reservations or guarantees against pressure on other applications.
 
-For a diagnostic comparison, `prepare_camera_demo_unity.sh --no-soft-limit`
-sets `MemoryHigh=infinity` while retaining the 5 GiB hard RAM cap, 512 MiB swap
-cap, timeout, and pressure shutdown. The default remains 4 GiB memory high until
-the budget is reviewed. The controlled no-soft-limit comparison reached the
-5 GiB hard cap and Unity was killed for cgroup OOM; this flag alone did not fix
-the import. See [comparison results](docs/verification.md#comparison-without-the-soft-limit).
+`prepare_camera_demo_unity.sh` is an **optional diagnostic tool**, outside the
+normal setup/run sequence. It starts only Unity in batch mode with sequential
+imports, two job workers, and one GC helper, then exits after scene opening.
+It requires a systemd user manager, Linux memory pressure reporting, and readable
+cgroup v2 memory counters. Its default experimental budget is 4 GiB memory high,
+5 GiB memory max, 512 MiB swap, and initially 7 GiB available host RAM.
+`--no-soft-limit` removes the soft limit; `UNITY_IMPORT_RAM_GIB=7` selects a 7 GiB
+hard cap and a 9 GiB initial headroom check. These stricter experiments stopped
+before completing import; they do not establish normal demo requirements.
+See [measured results](docs/verification.md#controlled-import-result).
 
-A separately approved 7 GiB diagnostic budget is available with
-`UNITY_IMPORT_RAM_GIB=7` and `--no-soft-limit`. The preflight then requires 9 GiB
-available host RAM (the cap plus 2 GiB headroom). The default remains 5 GiB, with
-7 GiB initial headroom; swap remains capped at 512 MiB for either budget. Only
-these two experimental budgets are accepted; neither is a measured requirement.
-The controlled 7 GiB import also ended in cgroup OOM before scene readiness.
-Current main uses an 8 GiB RAM / 2 GiB swap budget for the camera launcher, without
-a free-RAM threshold or separate import gate; see [the comparison](docs/verification.md#comparison-with-current-main).
-
-Every import now writes `scope-memory.jsonl` alongside host readings in
-`memory.log`. Scope samples contain memory and swap usage, available peak
-counters, the applied limits, `memory.events` (including `high`, `max`, `oom`,
-and `oom_kill`), and scope memory pressure. These cgroup v2 counters help
-separate limit-induced reclaim from host-wide pressure; see the
-[Linux kernel reference](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#memory-interface-files).
-Five consecutive scope-sampling failures also stop the import rather than
-continuing without diagnostic data. Peak counters absent on older kernels are
-recorded as `null`; the remaining required counters must be readable.
-
-On hosts without a systemd user manager, import the project separately through
-Unity Hub; the helper's supervision is unavailable there. Cache detection uses
-`Library/ArtifactDB`, `Library/SourceAssetDB`, and the compiled project assembly.
-Their presence suggests an earlier import but does not guarantee that assets are
-current. If the import helper has run, its latest run must also have a `COMPLETE`
-marker, written only after successful scene opening; interrupted imports stay
-blocked even when all three cache files exist. The normal launcher refuses a
-missing/incomplete cache before stopping project processes. `UNITY_MODE=manual` can still test ROS/YOLO without opening
-Unity. After an interrupted import, rerun preparation before trying delivery.
+The optional diagnostic samples host and scope memory each second. It stops
+after five consecutive checks below 2 GiB available host RAM or at least 10%
+full host pressure (`avg10`), five scope-sampling failures, or 600 seconds.
+`UNITY_IMPORT_TIMEOUT` accepts 1–600 seconds; the scope also has an independent
+runtime limit. Logs and cgroup usage/reclaim/OOM counters are retained under
+`ROS1/build/unity-import-*/`. Diagnostic cache checks require the latest run's
+`COMPLETE` marker as well as asset databases and the compiled assembly. The
+normal launcher does not use these diagnostic completion checks.
 
 CPU inference is the default. For an NVIDIA driver compatible with CUDA 12.4:
 
@@ -881,16 +854,15 @@ When a systemd user manager is available, host demo processes run in a scope
 capped at 8 GiB RAM and 2 GiB swap by default. Set `CAMERA_DEMO_MEMORY_MAX` and
 `CAMERA_DEMO_SWAP_MAX` to adjust these limits. `CAMERA_DEMO_MEMORY_MODE=auto`
 uses the scope when available; `required` refuses startup without it; `off`
-disables it. Normal startup reports available host RAM and warns below 4 GiB;
-this is provisional guidance, not a measured requirement or a refusal threshold.
+disables it. There is no default available-RAM threshold or cache admission gate.
 `CAMERA_DEMO_MIN_AVAILABLE_GIB` optionally enforces an explicit positive minimum
-before services start or any editor closes. There is no default 10 GiB minimum.
-Swap is not counted as available RAM, and the check does not reserve memory.
+before services start or any editor closes. This check is independent of the
+optional import diagnostics and does not reserve memory.
 
-Unity imports assets sequentially (`-refreshImportMode InProcess`), uses two job
-workers and one asset garbage-collector helper. This reduces concurrency compared
-with the previous launcher. `UNITY_STARTUP_TIMEOUT` sets the scene startup timeout
-in seconds (default 600). Without a scope, no launcher memory cap is applied.
+Unity launches with four job workers, as on main, without forcing import mode or
+GC helper settings. `UNITY_STARTUP_TIMEOUT` sets the scene startup timeout in
+seconds (default 600, allowing more time for fresh imports than main's fixed 180
+seconds). Without a scope, no launcher memory cap is applied.
 Builds use two jobs; ROS in Distrobox uses the container's resource group. Each
 run retains logs and helper snapshots under
 `ROS1/build/camera-demo-<timestamp>-<id>/`. Limits do not guarantee sufficient RAM.

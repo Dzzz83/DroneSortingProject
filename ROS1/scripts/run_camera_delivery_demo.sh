@@ -151,10 +151,7 @@ open_unity() {
         mv "$PROJECT_ROOT/Unity/Temp/__Backupscenes" "$RUN_DIR/unity-scene-backups"
         echo "[RESTART] Preserved Unity recovery scenes: $RUN_DIR/unity-scene-backups"
     fi
-    # Import sequentially: job-worker-count alone does not limit asset import
-    # processes, which exhausted memory during the fresh-checkout verification.
-    "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -job-worker-count 2 \
-        -refreshImportMode InProcess -gc-helper-count 1 \
+    "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -job-worker-count 4 \
         -executeMethod DeliveryDemoSceneLauncher.OpenMainWarehouse \
         -logFile "$RUN_DIR/unity.log" > "$RUN_DIR/unity-start.log" 2>&1 &
     UNITY_PID=$!
@@ -169,11 +166,12 @@ open_unity() {
 }
 
 check_dependencies "$@"
-MEMORY_ARGUMENTS=(--project "$PROJECT_ROOT" --unity-mode "$UNITY_MODE")
+# Normal startup follows the working main launcher. Strict memory admission is
+# opt-in; the separate import diagnostic must not become a launch prerequisite.
 if [[ -n "${CAMERA_DEMO_MIN_AVAILABLE_GIB:-}" ]]; then
-    MEMORY_ARGUMENTS+=(--minimum-gib "$CAMERA_DEMO_MIN_AVAILABLE_GIB")
+    python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" \
+        --minimum-gib "$CAMERA_DEMO_MIN_AVAILABLE_GIB"
 fi
-python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" "${MEMORY_ARGUMENTS[@]}"
 isolate_demo_processes "$@"
 mkdir -p "$PROJECT_ROOT/ROS1/build"
 # Serialize replacement while allowing the next invocation to stop this run.
