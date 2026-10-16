@@ -882,8 +882,41 @@ helper refuses to run alongside an editor for the same checkout.
 Tests exercise cached startup at 8.7 GiB, fresh/partial caches, advisory versus
 explicit minimums, pressure boundaries, bounded command arguments, import failure,
 timeout, and scope cleanup. Editors and systemd are faked for import tests; they
-allocate no test memory. **The real import and subsequent delivery have not been
-run with this policy.** They require a separately approved controlled test.
+allocate no test memory. The first real import attempt is recorded below;
+subsequent delivery has not run with this policy.
+
+### Controlled import result
+
+On 2026-10-16, the approved Unity-only preparation command ran against
+`~/Documents/code/test/DroneSortingProject-fresh` with the limits above. It began
+with about 10.6 GiB available host RAM and no full-memory-stall pressure. The
+monitor stopped it after five consecutive pressure checks exceeded 10% full
+`avg10`; systemd recorded scope shutdown after about 93 seconds. No limits were
+increased and no second import was attempted.
+
+- Sampled peak scope memory: 4.02 GiB. The journal recorded a 512 MiB swap peak.
+- Lowest sampled host available RAM: 6.63 GiB.
+- Highest recorded full memory pressure `avg10`: 17.89%.
+- The project assembly was emitted; no `error CS` lines appeared in the captured
+  log. Scene readiness and complete import were not confirmed.
+- Scope shutdown was explicitly requested by the monitor. No project editor
+  processes remained afterward; no kernel OOM events appeared in the test window.
+  These observations do not guarantee that other applications felt no slowdown.
+
+Logs remain in the fresh checkout under
+`ROS1/build/unity-import-AsDIuR/` (`unity.log`, `scope.log`, `memory.log`, and the
+recorded scope name). The tested limits did not complete this first import, so
+normal demo startup and physical delivery were not attempted. This run measures
+a resource-constrained import; it does not establish the machine's minimum RAM
+requirement or prove that the 4 GiB soft limit is appropriate.
+
+The stopped import created all three cache files despite never confirming scene
+readiness. The cache guard therefore now requires a `COMPLETE` marker in the
+latest recorded import run, in addition to the cache files. The preparation
+helper writes it only after successful exit and scene confirmation. Previously
+working checkouts that predate this helper still use the file indicators. A
+regression test covers interrupted imports with apparently complete cache files.
+The final lightweight tool suite ran 77 tests, with two ROS-only skips.
 
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default

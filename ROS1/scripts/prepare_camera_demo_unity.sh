@@ -105,8 +105,9 @@ python3 - "$PROJECT_ROOT" "$SCRIPT_DIR/../tools" <<'PYTHON'
 from pathlib import Path
 import sys
 sys.path.insert(0, sys.argv[2])
-from camera_demo_resources import has_unity_cache
-if not has_unity_cache(Path(sys.argv[1])):
+from camera_demo_resources import has_unity_cache_files
+if not has_unity_cache_files(Path(sys.argv[1])):
     raise SystemExit('Unity exited without the expected cache files.')
 PYTHON
+touch "$RUN_DIR/COMPLETE"
 echo "[OK] Unity import and scene opening completed. Logs: $RUN_DIR"

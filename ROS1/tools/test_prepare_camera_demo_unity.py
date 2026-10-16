@@ -80,6 +80,7 @@ exec '{sys.executable}' "$@"
             self.assertTrue((root / 'scope-stopped').exists())
             self.assertTrue((root / 'Unity/Library/ArtifactDB').exists())
             self.assertIn('scene opening completed', result.stdout)
+            self.assertEqual(len(list((root / 'ROS1/build').glob('unity-import-*/COMPLETE'))), 1)
 
     def test_pressure_stops_import_without_success(self):
         with tempfile.TemporaryDirectory() as temporary:

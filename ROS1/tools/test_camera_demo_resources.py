@@ -80,3 +80,15 @@ class StartupPolicyTests(unittest.TestCase):
         self.assertIsNone(import_pressure_reason(2, healthy))
         self.assertIn('below 2 GiB', import_pressure_reason(1.99, healthy))
         self.assertIn('10%', import_pressure_reason(3, healthy.replace('9.99', '10.00')))
+
+    def test_interrupted_recorded_import_overrides_cache_file_presence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            info = self.fixtures(root, 8 * 1024 ** 2, True)
+            run = root / 'ROS1/build/unity-import-trial'
+            run.mkdir(parents=True)
+            self.assertFalse(has_unity_cache(root))
+            with self.assertRaisesRegex(ValueError, 'prepare_camera_demo_unity.sh'):
+                check_startup(root, 'auto', meminfo=info)
+            (run / 'COMPLETE').touch()
+            self.assertTrue(has_unity_cache(root))

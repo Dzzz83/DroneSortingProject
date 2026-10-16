@@ -543,14 +543,17 @@ least 10% full-memory-stall pressure (`avg10`), or after 600 seconds. The scope 
 `UNITY_IMPORT_TIMEOUT` from 1 to 600 seconds to shorten this limit. Logs, scope
 memory samples, and pressure readings stay under `ROS1/build/unity-import-*/`.
 These limits may stop an import before it finishes; they are not a guarantee
-against disruption. They have been tested with fake editors, not a real import.
+against disruption. The controlled real import stopped on memory-stall pressure
+before scene readiness; see [measured results](docs/verification.md#controlled-import-result).
 
 On hosts without a systemd user manager, import the project separately through
 Unity Hub; the helper's supervision is unavailable there. Cache detection uses
 `Library/ArtifactDB`, `Library/SourceAssetDB`, and the compiled project assembly.
 Their presence suggests an earlier import but does not guarantee that assets are
-current. The normal launcher refuses a missing/incomplete cache before stopping
-project processes. `UNITY_MODE=manual` can still test ROS/YOLO without opening
+current. If the import helper has run, its latest run must also have a `COMPLETE`
+marker, written only after successful scene opening; interrupted imports stay
+blocked even when all three cache files exist. The normal launcher refuses a
+missing/incomplete cache before stopping project processes. `UNITY_MODE=manual` can still test ROS/YOLO without opening
 Unity. After an interrupted import, rerun preparation before trying delivery.
 
 CPU inference is the default. For an NVIDIA driver compatible with CUDA 12.4:

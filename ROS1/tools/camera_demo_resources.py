@@ -26,15 +26,25 @@ def check_available_memory(minimum_gib, meminfo=Path('/proc/meminfo')):
     return available
 
 
-def has_unity_cache(project):
-    # These files indicate an existing import, not that every asset is current.
+def has_unity_cache_files(project):
     return all((project / 'Unity/Library' / name).is_file() for name in CACHE_FILES)
+
+
+def has_unity_cache(project):
+    # A stopped import can create every cache file before the scene is ready.
+    imports = [path for path in (project / 'ROS1/build').glob('unity-import-*') if path.is_dir()]
+    if imports:
+        latest = max(imports, key=lambda path: path.stat().st_mtime_ns)
+        if not (latest / 'COMPLETE').is_file():
+            return False
+    # Older, previously working checkouts may predate the import helper.
+    return has_unity_cache_files(project)
 
 
 def check_startup(project, unity_mode, minimum_gib=None, meminfo=Path('/proc/meminfo')):
     cached = has_unity_cache(project)
     if not cached and unity_mode == 'auto':
-        raise ValueError('Unity has no complete cache indicators. Run '
+        raise ValueError('Unity cache is missing or its latest recorded import did not complete. Run '
                          'bash ROS1/scripts/prepare_camera_demo_unity.sh first. '
                          'It imports Unity without starting ROS or YOLO. '
                          'UNITY_MODE=manual can check the backend without opening Unity.')
