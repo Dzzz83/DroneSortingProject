@@ -553,6 +553,12 @@ the budget is reviewed. The controlled no-soft-limit comparison reached the
 5 GiB hard cap and Unity was killed for cgroup OOM; this flag alone did not fix
 the import. See [comparison results](docs/verification.md#comparison-without-the-soft-limit).
 
+A separately approved 7 GiB diagnostic budget is available with
+`UNITY_IMPORT_RAM_GIB=7` and `--no-soft-limit`. The preflight then requires 9 GiB
+available host RAM (the cap plus 2 GiB headroom). The default remains 5 GiB, with
+7 GiB initial headroom; swap remains capped at 512 MiB for either budget. Only
+these two experimental budgets are accepted; neither is a measured requirement.
+
 Every import now writes `scope-memory.jsonl` alongside host readings in
 `memory.log`. Scope samples contain memory and swap usage, available peak
 counters, the applied limits, `memory.events` (including `high`, `max`, `oom`,

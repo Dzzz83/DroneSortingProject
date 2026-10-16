@@ -11,7 +11,8 @@ SCRIPT = ROOT / 'ROS1/scripts/prepare_camera_demo_unity.sh'
 
 
 class UnityPreparationTests(unittest.TestCase):
-    def run_preparation(self, root, pressure=False, editor_status=0, timeout=False, no_soft_limit=False, telemetry_failure=False):
+    def run_preparation(self, root, *, pressure=False, editor_status=0, timeout=False,
+                        no_soft_limit=False, telemetry_failure=False, ram_gib=5):
         commands = root / 'commands'
         commands.mkdir()
         editor = commands / 'Unity'
@@ -48,6 +49,9 @@ exit 0
 ''',
             'python3': f'''#!/bin/bash
 if [[ "$1" == *camera_demo_resources.py ]]; then
+    if [[ " $* " == *--minimum-gib* ]]; then
+        printf '%s\\n' "$@" > "$PROJECT_ROOT/preflight-arguments"
+    fi
     if [[ " $* " == *--sample-scope* && "${{TEST_TELEMETRY:-}}" == yes ]]; then
         echo 'fixture telemetry failure' >&2
         exit 1
@@ -71,7 +75,8 @@ exec '{sys.executable}' "$@"
             env=dict(os.environ, PATH=f'{commands}:{os.environ["PATH"]}', PROJECT_ROOT=str(root),
                      UNITY_EDITOR=str(editor), TEST_PRESSURE='yes' if pressure else 'no',
                      TEST_TIMEOUT='yes' if timeout else 'no',
-                     TEST_TELEMETRY='yes' if telemetry_failure else 'no', UNITY_IMPORT_TIMEOUT='1' if timeout else '600'),
+                     TEST_TELEMETRY='yes' if telemetry_failure else 'no',
+                     UNITY_IMPORT_RAM_GIB=str(ram_gib), UNITY_IMPORT_TIMEOUT='1' if timeout else '600'),
             capture_output=True, text=True, timeout=15)
 
     def test_success_uses_bounded_scope_and_leaves_cache(self):
@@ -131,3 +136,21 @@ exec '{sys.executable}' "$@"
             self.assertIn('Cannot sample scope memory for five checks', result.stderr)
             self.assertTrue((root / 'scope-stopped').exists())
             self.assertFalse(list((root / 'ROS1/build').glob('unity-import-*/COMPLETE')))
+
+    def test_seven_gib_requires_nine_gib_headroom_and_keeps_swap_and_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = self.run_preparation(root, no_soft_limit=True, ram_gib=7)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = (root / 'scope-arguments').read_text()
+            for setting in ('MemoryHigh=infinity', 'MemoryMax=7G', 'MemorySwapMax=512M', 'RuntimeMaxSec=600'):
+                self.assertIn(setting, args)
+            self.assertEqual((root / 'preflight-arguments').read_text().splitlines()[-1], '9')
+
+    def test_unsupported_ram_cap_is_rejected_before_launch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = self.run_preparation(root, ram_gib=8)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('UNITY_IMPORT_RAM_GIB must be 5 or 7', result.stderr)
+            self.assertFalse((root / 'scope-arguments').exists())

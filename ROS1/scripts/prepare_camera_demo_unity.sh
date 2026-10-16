@@ -8,6 +8,11 @@ fail() { echo "[FAIL] $*" >&2; exit 1; }
 IMPORT_TIMEOUT="${UNITY_IMPORT_TIMEOUT:-600}"
 [[ "$IMPORT_TIMEOUT" =~ ^[1-9][0-9]{0,2}$ ]] && ((IMPORT_TIMEOUT <= 600)) \
     || fail 'UNITY_IMPORT_TIMEOUT must be an integer from 1 to 600 seconds.'
+IMPORT_RAM_GIB="${UNITY_IMPORT_RAM_GIB:-5}"
+case "$IMPORT_RAM_GIB" in
+    5|7) ;;
+    *) fail 'UNITY_IMPORT_RAM_GIB must be 5 or 7 for the current experiment budgets.' ;;
+esac
 MEMORY_HIGH=4G
 case "${1:-}" in
     '') ;;
@@ -22,9 +27,9 @@ command -v systemd-run >/dev/null || fail 'Bounded import requires systemd-run.'
 systemctl --user show-environment >/dev/null 2>&1 || fail 'Bounded import requires a systemd user manager.'
 [[ -r /proc/pressure/memory ]] || fail 'Bounded import requires Linux memory pressure reporting.'
 check_unity_assets
-# Budget: at most 5 GiB RAM for this import plus 2 GiB of initial host headroom.
+# Budget: the selected RAM cap plus 2 GiB of initial host headroom.
 # This is a provisional experiment budget, not a measured Unity requirement.
-python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" --minimum-gib 7
+python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" --minimum-gib "$((IMPORT_RAM_GIB + 2))"
 python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" --check-import-pressure
 mkdir -p "$PROJECT_ROOT/ROS1/build"
 exec 9> "$PROJECT_ROOT/ROS1/build/camera-demo.lock"
@@ -67,9 +72,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 printf '%s\n' "$SCOPE" > "$RUN_DIR/systemd-scope.txt"
-echo "[IMPORT] Unity only: RAM high=$MEMORY_HIGH/max=5G; swap max=512M; timeout=${IMPORT_TIMEOUT}s. Logs: $RUN_DIR"
+echo "[IMPORT] Unity only: RAM high=$MEMORY_HIGH/max=${IMPORT_RAM_GIB}G; swap max=512M; timeout=${IMPORT_TIMEOUT}s. Logs: $RUN_DIR"
 systemd-run --user --scope --quiet --unit="$SCOPE" \
-    --property="MemoryHigh=$MEMORY_HIGH" --property=MemoryMax=5G --property=MemorySwapMax=512M \
+    --property="MemoryHigh=$MEMORY_HIGH" --property="MemoryMax=${IMPORT_RAM_GIB}G" --property=MemorySwapMax=512M \
     --property="RuntimeMaxSec=$IMPORT_TIMEOUT" \
     "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -batchmode -quit \
     -refreshImportMode InProcess -job-worker-count 2 -gc-helper-count 1 \

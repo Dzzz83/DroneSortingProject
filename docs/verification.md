@@ -982,6 +982,19 @@ and `kernel-oom.log`. The disposable Unity source/cache copy was removed after
 process shutdown; both original checkouts were preserved. A further live test
 requires a separate decision on the import workload or resource budget.
 
+### Preparing the 7 GiB comparison
+
+The user authorized one 7 GiB RAM trial without a soft limit, retaining the
+512 MiB swap cap, pressure shutdown, and timeout. `UNITY_IMPORT_RAM_GIB=7` selects
+this budget; preflight derives a 9 GiB available-host-RAM minimum by reserving
+2 GiB beyond the cap. The default remains 5 GiB. Unsupported budgets are rejected
+before launch. Tests check the derived headroom and unchanged swap/time limits.
+A new isolated copy without `Library` was prepared under ignored
+`ROS1/build/import-limit-comparison-7g/`. Initial preflight found only 8.7 GiB
+available and refused startup; no application was closed by the script. The
+lightweight suite ran 83 tests with two ROS-only skips; shell syntax and
+whitespace checks passed.
+
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default
 remain unverified. A future live check should be scheduled only with sufficient

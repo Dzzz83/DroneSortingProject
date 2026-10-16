@@ -24,8 +24,7 @@ def check_available_memory(minimum_gib, meminfo=Path('/proc/meminfo')):
     if available < minimum_gib:
         raise ValueError(
             f'Only {available:.1f} GiB RAM is available; the configured minimum is '
-            f'{minimum_gib:g} GiB. Close memory-heavy applications first. '
-            'CAMERA_DEMO_MIN_AVAILABLE_GIB adjusts this optional hard minimum.')
+            f'{minimum_gib:g} GiB. Close memory-heavy applications first.')
     return available
 
 
