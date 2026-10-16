@@ -26,7 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--weights", required=True, type=Path)
     parser.add_argument("--port", type=int, default=10001)
-    parser.add_argument("--device", default="0")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--image-size", type=int, default=640)
     parser.add_argument("--context-scale", type=float, default=1,

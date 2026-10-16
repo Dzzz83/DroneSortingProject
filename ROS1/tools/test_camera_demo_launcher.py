@@ -19,7 +19,8 @@ class CameraLauncherTests(unittest.TestCase):
         self.assertIn('always restarts the demo', result.stderr)
 
     def run_launcher(self, **overrides):
-        environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true')
+        environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true',
+                           CAMERA_DEMO_MEMORY_MODE='off', CAMERA_DEMO_MIN_AVAILABLE_GIB='0.01')
         environment.update(overrides)
         # Restart tests must never target the developer's real open project.
         with tempfile.TemporaryDirectory() as temporary:
@@ -46,6 +47,42 @@ class CameraLauncherTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('set DETECTOR_WEIGHTS', result.stderr)
 
+    def test_low_memory_refuses_before_restarting_project_processes(self):
+        with tempfile.NamedTemporaryFile() as weights:
+            result = self.run_launcher(DETECTOR_WEIGHTS=weights.name,
+                                       CAMERA_DEMO_MIN_AVAILABLE_GIB='1000000')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Close memory-heavy applications', result.stderr)
+            self.assertNotIn('[RESTART]', result.stdout)
+
+    def test_memory_modes_without_systemd_user_manager(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'camera_demo_linux.sh').write_text((ROOT / 'ROS1/scripts/camera_demo_linux.sh').read_text())
+            definitions = root / 'launcher-functions.sh'
+            definitions.write_text(LAUNCHER.read_text().split('\ncheck_dependencies "$@"', 1)[0])
+            for mode, succeeds in (('auto', True), ('off', True), ('required', False)):
+                with self.subTest(mode=mode):
+                    result = subprocess.run(
+                        ['bash', '-c', 'source "$1"; systemctl() { return 1; }; isolate_demo_processes',
+                         'bash', str(definitions)],
+                        env=dict(os.environ, CAMERA_DEMO_MEMORY_MODE=mode, CAMERA_DEMO_SCOPE=''),
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode == 0, succeeds, result.stderr)
+
+    def test_manual_unity_does_not_start_editor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'camera_demo_linux.sh').write_text((ROOT / 'ROS1/scripts/camera_demo_linux.sh').read_text())
+            definitions = root / 'launcher-functions.sh'
+            definitions.write_text(LAUNCHER.read_text().split('\ncheck_dependencies "$@"', 1)[0])
+            result = subprocess.run(['bash', '-c', 'source "$1"; open_unity; [[ -z "$UNITY_PID" ]]',
+                                     'bash', str(definitions)],
+                                    env=dict(os.environ, UNITY_MODE='manual', UNITY_EDITOR='/nonexistent'),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('press Play', result.stdout)
+
     def test_existing_service_is_not_terminated(self):
         with tempfile.NamedTemporaryFile() as weights, socket.socket() as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -69,11 +106,14 @@ class CameraLauncherTests(unittest.TestCase):
             run = root / 'run'
             run.mkdir()
             definitions = root / 'launcher-functions.sh'
+            (root / 'camera_demo_linux.sh').write_text((ROOT / 'ROS1/scripts/camera_demo_linux.sh').read_text())
             definitions.write_text(LAUNCHER.read_text().split('\ncheck_dependencies "$@"', 1)[0])
             editor = root / 'editor'
             editor.write_text('''#!/usr/bin/env python3
 import pathlib, sys, time
 log = pathlib.Path(sys.argv[sys.argv.index('-logFile') + 1])
+assert sys.argv[sys.argv.index('-refreshImportMode') + 1] == 'InProcess'
+assert sys.argv[sys.argv.index('-job-worker-count') + 1] == '2'
 log.write_text('Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity\\n')
 time.sleep(30)
 ''')

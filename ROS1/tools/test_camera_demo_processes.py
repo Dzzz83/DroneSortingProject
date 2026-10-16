@@ -39,6 +39,32 @@ class CameraDemoProcessTests(unittest.TestCase):
             lifecycle.send_signal(old, lifecycle.signal.SIGTERM)
             kill.assert_not_called()
 
+    def test_manual_mode_preserves_editor_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run = root / 'ROS1/build/camera-demo-old'
+            run.mkdir(parents=True)
+            (run / 'systemd-scope.txt').write_text('camera-delivery-1-2.scope')
+            editor = process(['/opt/Unity', '-projectPath', str(root / 'Unity')])
+            with patch.object(lifecycle, 'processes', return_value=[editor]), \
+                    patch.object(lifecycle, 'stop_scope') as scope, \
+                    patch.object(lifecycle, 'stop_processes') as stop:
+                lifecycle.restart(root, '', unity_mode='manual')
+                scope.assert_not_called()
+                stop.assert_not_called()
+
+    def test_restart_without_scope_stops_editor_descendants(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            editor = process(['/opt/Unity', '-projectPath', str(root / 'Unity')])
+            worker = lifecycle.Process(23456, '124', ('worker',), frozenset(), frozenset(), editor.pid)
+            unrelated = lifecycle.Process(34567, '125', ('worker',), frozenset(), frozenset(), 1)
+            with patch.object(lifecycle, 'processes', return_value=[editor, worker, unrelated]), \
+                    patch.object(lifecycle, 'still_running', return_value=True), \
+                    patch.object(lifecycle, 'stop_processes') as stop:
+                lifecycle.restart(root, '')
+                stop.assert_called_once_with([editor, worker])
+
     def test_current_scope_and_invalid_records_are_preserved(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

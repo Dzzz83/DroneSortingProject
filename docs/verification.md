@@ -785,8 +785,8 @@ python3 -m unittest discover -s ROS1/tools -p 'test_camera_demo_launcher.py' -v
 ```
 
 In a sourced Noetic environment, run the two ROS helper checks separately. The
-full host launcher suite requires the host systemd user manager and should not
-be run inside a container without it.
+launcher tests use fake editors and disable systemd isolation; they do not start
+the real Unity Editor. Host runs skip the two ROS helper checks.
 
 ```bash
 python3 -m unittest discover -s ROS1/tools -p 'test_camera_demo_launcher.py' -k existing_workspace_package -v
@@ -811,6 +811,51 @@ Save it as `request.json`; the editor consumes it and replaces the previews.
 This does not alter the runtime camera configuration. Inspect images even when
 the collider check passes: an earlier office-roof obstruction was visible in
 rendered previews but absent from the collider results.
+
+## Linux portability verification
+
+The `feat/linux-portable-setup` changes package the existing checkpoint and pin
+host Python dependencies, ROS-TCP-Endpoint, and the Unity ROS connector. Checks on
+the x86-64 CachyOS host with the existing Ubuntu 20.04 Noetic Distrobox found:
+
+- A disposable fresh checkout downloaded all nine Git LFS pointer assets from
+  GitHub. Git LFS also warned about 150 existing assets tracked as ordinary Git
+  binaries despite matching the LFS attributes; these files were present.
+- CPU setup installed a new Python 3.11 environment, passed `pip check`, loaded
+  the included single-class model and performed inference, and built a new
+  dedicated Catkin workspace. Repeating setup succeeded. No existing detector
+  environment or Catkin workspace was reused; the host Python 3.11 interpreter
+  and existing ROS container were prerequisites.
+- Setup refused to replace the existing camera workspace's Endpoint link.
+- Fresh launch reached CPU detector readiness and started ROS before opening
+  Unity. **Unity startup failed:** at 02:17 on 2026-10-15 the system memory-pressure
+  service killed Chromium's process group; at 02:18 the kernel killed Unity after
+  its demo scope reached 8 GiB RAM and 2 GiB swap. The pre-launch host had only
+  about 3.8 GiB available RAM. Scene readiness, compilation completion and physical
+  delivery were not verified for this checkout.
+- After that failure, the launcher gained a 10 GiB available-RAM preflight and
+  sequential asset imports with two job workers and one GC helper. Unit tests
+  exercise memory boundaries using files, not memory allocation, and check the
+  editor arguments using a fake editor. The real Unity import was **not rerun**;
+  these precautions have not been validated under a full import workload.
+- The host Python tool suite ran 66 tests successfully, with two ROS-only checks
+  skipped. Inside Noetic, all 69 existing ROS tests and all 26 camera launcher,
+  Linux configuration, resource, and process tests passed without skips. Shell
+  syntax, affected Python parsing, Unity package JSON, the model checksum, and
+  diff whitespace checks passed.
+
+For lightweight regression checks (no real Unity launch):
+
+```bash
+bash -n ROS1/scripts/camera_demo_linux.sh ROS1/scripts/setup_camera_demo_linux.sh \
+  ROS1/scripts/run_camera_delivery_demo.sh
+python3 -m unittest discover -s ROS1/tools -p 'test_*.py'
+```
+
+Native Noetic on another Linux distribution, a newly created ROS container,
+optional CUDA installation, and physical delivery using the new CPU default
+remain unverified. A future live check should be scheduled only with sufficient
+memory headroom; the scope limit alone did not protect other applications.
 
 ## What remains unverified
 
