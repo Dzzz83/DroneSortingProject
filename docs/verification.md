@@ -837,7 +837,8 @@ the x86-64 CachyOS host with the existing Ubuntu 20.04 Noetic Distrobox found:
   sequential asset imports with two job workers and one GC helper. Unit tests
   exercise memory boundaries using files, not memory allocation, and check the
   editor arguments using a fake editor. The real Unity import was **not rerun**;
-  these precautions have not been validated under a full import workload.
+  these precautions have not been validated under a full import workload. The
+  blanket 10 GiB minimum was subsequently removed as described below.
 - The host Python tool suite ran 66 tests successfully, with two ROS-only checks
   skipped. Inside Noetic, all 69 existing ROS tests and all 26 camera launcher,
   Linux configuration, resource, and process tests passed without skips. Shell
@@ -851,6 +852,38 @@ bash -n ROS1/scripts/camera_demo_linux.sh ROS1/scripts/setup_camera_demo_linux.s
   ROS1/scripts/run_camera_delivery_demo.sh
 python3 -m unittest discover -s ROS1/tools -p 'test_*.py'
 ```
+
+### Separate import and cached startup
+
+Inspection of the original checkout found both asset databases and
+`Library/ScriptAssemblies/Assembly-CSharp.dll`. The user's fresh checkout had none
+of these files. This establishes different cache states, but does not measure
+the RAM required for either workload. No cache was deleted or copied between
+checkouts.
+
+Normal startup now reports memory, warns below a provisional 4 GiB, and enforces
+a hard minimum only when `CAMERA_DEMO_MIN_AVAILABLE_GIB` is explicitly set. A
+missing/incomplete cache directs automatic startup to `prepare_camera_demo_unity.sh`
+before project processes are stopped. Manual backend-only startup still works
+without a cache. Cache files are indicators, not proof that no reimport is needed.
+
+The new import helper runs Unity alone with sequential imports, two job workers,
+one GC helper, and a ten-minute maximum. Its provisional experiment budget is
+4 GiB memory high, 5 GiB memory max, 512 MiB swap max, and 7 GiB initially available
+host RAM. Five consecutive checks with less than 2 GiB available RAM or at least
+10% full memory pressure (`avg10`) stop its scope. It records host memory/pressure
+and scope memory samples, and cleans up only its own scope on failure or timeout.
+These are experiment limits, not measured minimum hardware requirements. The
+latest host tool suite ran 76 tests with two ROS-only skips. Shell syntax and
+diff whitespace checks passed. The proposed systemd memory and runtime limit
+properties were accepted in a `/bin/true` probe; this did not start Unity. The
+helper refuses to run alongside an editor for the same checkout.
+
+Tests exercise cached startup at 8.7 GiB, fresh/partial caches, advisory versus
+explicit minimums, pressure boundaries, bounded command arguments, import failure,
+timeout, and scope cleanup. Editors and systemd are faked for import tests; they
+allocate no test memory. **The real import and subsequent delivery have not been
+run with this policy.** They require a separately approved controlled test.
 
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default

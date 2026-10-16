@@ -18,7 +18,7 @@ class CameraLauncherTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('always restarts the demo', result.stderr)
 
-    def run_launcher(self, **overrides):
+    def run_launcher(self, with_cache=True, **overrides):
         environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true',
                            CAMERA_DEMO_MEMORY_MODE='off', CAMERA_DEMO_MIN_AVAILABLE_GIB='0.01')
         environment.update(overrides)
@@ -28,6 +28,11 @@ class CameraLauncherTests(unittest.TestCase):
             scene = project / 'Unity/Assets/Scenes/MainWarehouse.unity'
             scene.parent.mkdir(parents=True)
             scene.touch()
+            if with_cache:
+                for name in ('ArtifactDB', 'SourceAssetDB', 'ScriptAssemblies/Assembly-CSharp.dll'):
+                    cache = project / 'Unity/Library' / name
+                    cache.parent.mkdir(parents=True, exist_ok=True)
+                    cache.touch()
             tools = project / 'ROS1/tools'
             tools.mkdir(parents=True)
             (tools / 'camera_demo_processes.py').write_text(
@@ -53,6 +58,13 @@ class CameraLauncherTests(unittest.TestCase):
                                        CAMERA_DEMO_MIN_AVAILABLE_GIB='1000000')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Close memory-heavy applications', result.stderr)
+            self.assertNotIn('[RESTART]', result.stdout)
+
+    def test_fresh_checkout_refuses_before_restarting_processes(self):
+        with tempfile.NamedTemporaryFile() as weights:
+            result = self.run_launcher(with_cache=False, DETECTOR_WEIGHTS=weights.name)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('prepare_camera_demo_unity.sh', result.stderr)
             self.assertNotIn('[RESTART]', result.stdout)
 
     def test_memory_modes_without_systemd_user_manager(self):

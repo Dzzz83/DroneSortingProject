@@ -227,6 +227,7 @@ Warehouse obstacle avoidance is disabled by default until the warehouse sensor r
 | `run_delivery_demo.sh` | Runs the smaller `SampleScene` integration demo |
 | `run_warehouse_ros_demo.sh` | Runs the fixed-coordinate `MainWarehouse` delivery on Linux or WSL2 |
 | `setup_camera_demo_linux.sh` | Installs pinned detector dependencies and prepares the camera ROS workspace |
+| `prepare_camera_demo_unity.sh` | Imports Unity alone with bounded memory and pressure monitoring |
 | `run_camera_delivery_demo.sh` | Restarts the camera demo, prepares ROS/YOLO, opens `MainWarehouse`, and waits for manual Play |
 | `prepare_camera_demo_ros.sh` | Links and incrementally builds a dedicated Catkin workspace without replacing the existing package |
 | `start_camera_demo_ros.sh` | Starts ROS, checks node/endpoint readiness, monitors the mission, and cleans up its ROS processes |
@@ -485,10 +486,11 @@ model is included in Git; setup installs dependencies without training.
 The initial portability target is **x86-64 host Linux**, Unity `6000.6.0f1`,
 Python **3.11** with `venv`/`pip`, Git/Git LFS, and either native ROS Noetic or
 Distrobox with an Ubuntu 20.04 Noetic container. The host also needs a working
-Unity graphics environment and OpenCV's `libGL`/GLib libraries. The launcher
-requires 10 GiB of available RAM by default (available RAM, not total installed
-RAM). Close memory-heavy applications before starting. Install these
-prerequisites through your distribution; setup does not install system packages
+Unity graphics environment and OpenCV's `libGL`/GLib libraries. First-time Unity
+import is separate from normal startup; the bounded import helper requires a
+systemd user manager, Linux memory pressure reporting, and initially 7 GiB of
+available RAM. This is a provisional test budget, not a measured hardware
+requirement. Install these prerequisites through your distribution; setup does not install system packages
 or Unity. Ubuntu 20.04's default Python 3.8 is for ROS; install Python 3.11
 separately on the host for the detector. Set `DETECTOR_SETUP_PYTHON` if its binary
 is not named `python3.11`.
@@ -518,6 +520,7 @@ git clone https://github.com/Dzzz83/DroneSortingProject.git
 cd DroneSortingProject
 git lfs pull
 bash ROS1/scripts/setup_camera_demo_linux.sh
+bash ROS1/scripts/prepare_camera_demo_unity.sh
 bash ROS1/scripts/run_camera_delivery_demo.sh
 ```
 
@@ -529,6 +532,26 @@ workspace. It supports repeated runs and refuses to replace unrelated workspace
 packages or change an existing Endpoint checkout. Stop the launcher before
 rerunning setup. Internet access is needed for the first dependency installation.
 Generated dependencies stay under ignored `ROS1/build/`.
+
+Prepare Unity once before the first automatic demo launch. The helper starts only
+Unity in batch mode, imports assets sequentially, compiles scripts, opens the
+warehouse scene, and exits. It never starts ROS or YOLO or closes another editor.
+It uses a systemd scope with `MemoryHigh=4G`, `MemoryMax=5G`, and
+`MemorySwapMax=512M`. It samples host available RAM and memory pressure each
+second, stopping after five consecutive checks below 2 GiB available RAM or at
+least 10% full-memory-stall pressure (`avg10`), or after 600 seconds. The scope also has an independent systemd runtime limit. Set
+`UNITY_IMPORT_TIMEOUT` from 1 to 600 seconds to shorten this limit. Logs, scope
+memory samples, and pressure readings stay under `ROS1/build/unity-import-*/`.
+These limits may stop an import before it finishes; they are not a guarantee
+against disruption. They have been tested with fake editors, not a real import.
+
+On hosts without a systemd user manager, import the project separately through
+Unity Hub; the helper's supervision is unavailable there. Cache detection uses
+`Library/ArtifactDB`, `Library/SourceAssetDB`, and the compiled project assembly.
+Their presence suggests an earlier import but does not guarantee that assets are
+current. The normal launcher refuses a missing/incomplete cache before stopping
+project processes. `UNITY_MODE=manual` can still test ROS/YOLO without opening
+Unity. After an interrupted import, rerun preparation before trying delivery.
 
 CPU inference is the default. For an NVIDIA driver compatible with CUDA 12.4:
 
@@ -829,11 +852,11 @@ When a systemd user manager is available, host demo processes run in a scope
 capped at 8 GiB RAM and 2 GiB swap by default. Set `CAMERA_DEMO_MEMORY_MAX` and
 `CAMERA_DEMO_SWAP_MAX` to adjust these limits. `CAMERA_DEMO_MEMORY_MODE=auto`
 uses the scope when available; `required` refuses startup without it; `off`
-disables it. Before starting services or closing the previous editor, a memory
-preflight requires 10 GiB of host `MemAvailable`. `CAMERA_DEMO_MIN_AVAILABLE_GIB`
-adjusts this threshold; reducing it can expose other applications to memory
-pressure. The check does not reserve memory and swap is not counted as available
-RAM. These precautions do not guarantee that a fresh Unity import will fit.
+disables it. Normal startup reports available host RAM and warns below 4 GiB;
+this is provisional guidance, not a measured requirement or a refusal threshold.
+`CAMERA_DEMO_MIN_AVAILABLE_GIB` optionally enforces an explicit positive minimum
+before services start or any editor closes. There is no default 10 GiB minimum.
+Swap is not counted as available RAM, and the check does not reserve memory.
 
 Unity imports assets sequentially (`-refreshImportMode InProcess`), uses two job
 workers and one asset garbage-collector helper. This reduces concurrency compared

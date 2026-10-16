@@ -169,8 +169,11 @@ open_unity() {
 }
 
 check_dependencies "$@"
-python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" \
-    --minimum-gib "${CAMERA_DEMO_MIN_AVAILABLE_GIB:-10}"
+MEMORY_ARGUMENTS=(--project "$PROJECT_ROOT" --unity-mode "$UNITY_MODE")
+if [[ -n "${CAMERA_DEMO_MIN_AVAILABLE_GIB:-}" ]]; then
+    MEMORY_ARGUMENTS+=(--minimum-gib "$CAMERA_DEMO_MIN_AVAILABLE_GIB")
+fi
+python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" "${MEMORY_ARGUMENTS[@]}"
 isolate_demo_processes "$@"
 mkdir -p "$PROJECT_ROOT/ROS1/build"
 # Serialize replacement while allowing the next invocation to stop this run.
