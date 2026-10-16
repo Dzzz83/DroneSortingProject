@@ -1,7 +1,10 @@
 """Inspect Unity cache and Linux memory without starting application processes."""
 import argparse
+from datetime import datetime, timezone
+import json
 import math
 from pathlib import Path
+import subprocess
 
 GIB = 1024 ** 3
 CACHE_FILES = ('ArtifactDB', 'SourceAssetDB', 'ScriptAssemblies/Assembly-CSharp.dll')
@@ -72,15 +75,46 @@ def import_pressure_reason(available_gib, pressure_text):
     raise ValueError('Cannot read full memory pressure; refusing to continue import.')
 
 
+def read_scope_memory(directory):
+    """Read cgroup v2 counters before a stopped scope and its counters disappear."""
+    snapshot = {'timestamp': datetime.now(timezone.utc).isoformat()}
+    for name in ('memory.current', 'memory.swap.current',
+                 'memory.high', 'memory.max', 'memory.swap.max'):
+        value = (directory / name).read_text().strip()
+        snapshot[name] = value if value == 'max' else int(value)
+    snapshot['memory.events'] = {
+        key: int(value) for key, value in
+        (line.split() for line in (directory / 'memory.events').read_text().splitlines())}
+    snapshot['memory.pressure'] = (directory / 'memory.pressure').read_text().strip()
+    # Peak counters were added in newer kernels; current usage is still required.
+    for name in ('memory.peak', 'memory.swap.peak'):
+        peak = directory / name
+        snapshot[name] = int(peak.read_text()) if peak.exists() else None
+    return snapshot
+
+
+def sample_scope_memory(scope):
+    result = subprocess.run(
+        ['systemctl', '--user', 'show', scope, '--property=ControlGroup', '--value'],
+        capture_output=True, text=True, check=True, timeout=3)
+    group = result.stdout.strip()
+    if not group.startswith('/') or group == '/':
+        raise ValueError('Import scope cgroup is not available yet.')
+    return read_scope_memory(Path('/sys/fs/cgroup') / group.lstrip('/'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', type=Path)
     parser.add_argument('--unity-mode', choices=('auto', 'manual'), default='auto')
     parser.add_argument('--minimum-gib', type=float)
     parser.add_argument('--check-import-pressure', action='store_true')
+    parser.add_argument('--sample-scope', help='Record this scope\'s cgroup memory counters as JSON.')
     args = parser.parse_args()
     try:
-        if args.check_import_pressure:
+        if args.sample_scope:
+            print(json.dumps(sample_scope_memory(args.sample_scope)))
+        elif args.check_import_pressure:
             reason = import_pressure_reason(available_memory_gib(), Path('/proc/pressure/memory').read_text())
             if reason:
                 raise ValueError(reason)
@@ -92,7 +126,7 @@ def main():
             print(f'[OK] Available RAM: {available:.1f} GiB (not a reservation).')
         else:
             parser.error('Specify --project, --minimum-gib, or --check-import-pressure.')
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         parser.exit(1, f'[FAIL] {error}\n')
 
 

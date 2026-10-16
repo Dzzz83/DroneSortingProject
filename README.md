@@ -546,6 +546,21 @@ These limits may stop an import before it finishes; they are not a guarantee
 against disruption. The controlled real import stopped on memory-stall pressure
 before scene readiness; see [measured results](docs/verification.md#controlled-import-result).
 
+For a diagnostic comparison, `prepare_camera_demo_unity.sh --no-soft-limit`
+sets `MemoryHigh=infinity` while retaining the 5 GiB hard RAM cap, 512 MiB swap
+cap, timeout, and pressure shutdown. The default remains 4 GiB memory high until
+this experiment is evaluated. This flag is not a confirmed fix for import stalls.
+
+Every import now writes `scope-memory.jsonl` alongside host readings in
+`memory.log`. Scope samples contain memory and swap usage, available peak
+counters, the applied limits, `memory.events` (including `high`, `max`, `oom`,
+and `oom_kill`), and scope memory pressure. These cgroup v2 counters help
+separate limit-induced reclaim from host-wide pressure; see the
+[Linux kernel reference](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#memory-interface-files).
+Five consecutive scope-sampling failures also stop the import rather than
+continuing without diagnostic data. Peak counters absent on older kernels are
+recorded as `null`; the remaining required counters must be readable.
+
 On hosts without a systemd user manager, import the project separately through
 Unity Hub; the helper's supervision is unavailable there. Cache detection uses
 `Library/ArtifactDB`, `Library/SourceAssetDB`, and the compiled project assembly.

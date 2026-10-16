@@ -8,7 +8,13 @@ fail() { echo "[FAIL] $*" >&2; exit 1; }
 IMPORT_TIMEOUT="${UNITY_IMPORT_TIMEOUT:-600}"
 [[ "$IMPORT_TIMEOUT" =~ ^[1-9][0-9]{0,2}$ ]] && ((IMPORT_TIMEOUT <= 600)) \
     || fail 'UNITY_IMPORT_TIMEOUT must be an integer from 1 to 600 seconds.'
-[[ $# == 0 ]] || fail 'Usage: bash ROS1/scripts/prepare_camera_demo_unity.sh'
+MEMORY_HIGH=4G
+case "${1:-}" in
+    '') ;;
+    --no-soft-limit) MEMORY_HIGH=infinity ;;
+    *) fail 'Usage: bash ROS1/scripts/prepare_camera_demo_unity.sh [--no-soft-limit]' ;;
+esac
+[[ $# -le 1 ]] || fail 'Expected at most one option.'
 [[ "$(uname -s)" == Linux ]] || fail 'Host Linux is required.'
 find_unity_editor
 [[ -x "$UNITY_EDITOR" ]] || fail 'Unity 6000.6.0f1 is missing; set UNITY_EDITOR.'
@@ -61,9 +67,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 printf '%s\n' "$SCOPE" > "$RUN_DIR/systemd-scope.txt"
-echo "[IMPORT] Unity only: RAM high=4G/max=5G; swap max=512M; timeout=${IMPORT_TIMEOUT}s. Logs: $RUN_DIR"
+echo "[IMPORT] Unity only: RAM high=$MEMORY_HIGH/max=5G; swap max=512M; timeout=${IMPORT_TIMEOUT}s. Logs: $RUN_DIR"
 systemd-run --user --scope --quiet --unit="$SCOPE" \
-    --property=MemoryHigh=4G --property=MemoryMax=5G --property=MemorySwapMax=512M \
+    --property="MemoryHigh=$MEMORY_HIGH" --property=MemoryMax=5G --property=MemorySwapMax=512M \
     --property="RuntimeMaxSec=$IMPORT_TIMEOUT" \
     "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -batchmode -quit \
     -refreshImportMode InProcess -job-worker-count 2 -gc-helper-count 1 \
@@ -72,6 +78,7 @@ systemd-run --user --scope --quiet --unit="$SCOPE" \
 IMPORT_PID=$!
 started=$SECONDS
 pressure_samples=0
+telemetry_failures=0
 while kill -0 "$IMPORT_PID" 2>/dev/null; do
     if ((SECONDS - started >= IMPORT_TIMEOUT)); then
         fail "Import exceeded $IMPORT_TIMEOUT seconds; inspect $RUN_DIR."
@@ -81,15 +88,23 @@ while kill -0 "$IMPORT_PID" 2>/dev/null; do
     else
         pressure_samples=$((pressure_samples + 1))
     fi
-    if ((pressure_samples >= 5)); then
-        fail "Stopping import after five consecutive pressure checks; inspect $RUN_DIR/memory.log."
-    fi
     # Read-only samples: no additional application workload is started.
     printf '%(%FT%T%z)T\n' -1 >> "$RUN_DIR/memory.log"
     awk '/MemAvailable:|SwapFree:/ {print}' /proc/meminfo >> "$RUN_DIR/memory.log"
     cat /proc/pressure/memory >> "$RUN_DIR/memory.log"
-    systemctl --user show "$SCOPE" --property=MemoryCurrent --property=MemoryPeak \
-        >> "$RUN_DIR/memory.log" 2>/dev/null || true
+    if python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" --sample-scope "$SCOPE" \
+        >> "$RUN_DIR/scope-memory.jsonl" 2>> "$RUN_DIR/memory.log"; then
+        telemetry_failures=0
+    else
+        telemetry_failures=$((telemetry_failures + 1))
+    fi
+    # Capture the last pressure sample and scope counters before cleanup.
+    if ((pressure_samples >= 5)); then
+        fail "Stopping import after five consecutive pressure checks; inspect $RUN_DIR/memory.log."
+    fi
+    if ((telemetry_failures >= 5)); then
+        fail "Cannot sample scope memory for five checks; inspect $RUN_DIR/memory.log."
+    fi
     sleep 1
 done
 if wait "$IMPORT_PID"; then

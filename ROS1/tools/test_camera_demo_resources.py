@@ -3,7 +3,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from camera_demo_resources import check_available_memory, check_startup, has_unity_cache, import_pressure_reason
+from camera_demo_resources import (
+    check_available_memory, check_startup, has_unity_cache,
+    import_pressure_reason, read_scope_memory,
+)
 
 
 class MemoryPreflightTests(unittest.TestCase):
@@ -92,3 +95,35 @@ class StartupPolicyTests(unittest.TestCase):
                 check_startup(root, 'auto', meminfo=info)
             (run / 'COMPLETE').touch()
             self.assertTrue(has_unity_cache(root))
+
+
+class ScopeMemoryTests(unittest.TestCase):
+    def test_records_limits_events_and_pressure_with_optional_swap_peak(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            files = {
+                'memory.current': '1024', 'memory.peak': '2048',
+                'memory.swap.current': '512', 'memory.high': 'max',
+                'memory.max': '5368709120', 'memory.swap.max': '536870912',
+                'memory.events': 'low 0\nhigh 12\nmax 3\noom 0\noom_kill 0\n',
+                'memory.pressure': 'full avg10=11.00 avg60=0.00 avg300=0.00 total=20\n',
+            }
+            for name, value in files.items():
+                (root / name).write_text(value)
+            sample = read_scope_memory(root)
+            self.assertEqual(sample['memory.high'], 'max')
+            self.assertEqual(sample['memory.max'], 5 * 1024 ** 3)
+            self.assertEqual(sample['memory.events']['high'], 12)
+            self.assertEqual(sample['memory.events']['oom_kill'], 0)
+            self.assertEqual(sample['memory.swap.current'], 512)
+            self.assertIn('avg10=11.00', sample['memory.pressure'])
+            self.assertIsNone(sample['memory.swap.peak'])
+            (root / 'memory.swap.peak').write_text('768')
+            self.assertEqual(read_scope_memory(root)['memory.swap.peak'], 768)
+            (root / 'memory.peak').unlink()
+            self.assertIsNone(read_scope_memory(root)['memory.peak'])
+
+    def test_missing_scope_counter_is_reported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(OSError):
+                read_scope_memory(Path(temporary))

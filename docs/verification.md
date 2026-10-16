@@ -918,6 +918,36 @@ working checkouts that predate this helper still use the file indicators. A
 regression test covers interrupted imports with apparently complete cache files.
 The final lightweight tool suite ran 77 tests, with two ROS-only skips.
 
+### Prepared comparison without the soft limit
+
+The next proposed experiment changes only `MemoryHigh` from 4 GiB to unlimited;
+`MemoryMax=5G`, `MemorySwapMax=512M`, the initial headroom check, timeout, and
+pressure shutdown stay in place. `--no-soft-limit` selects it explicitly; it is
+not the default or a verified fix. The 4 GiB soft limit may have contributed to
+reclaim stalls in the previous run, but that run did not capture its event
+counters, so the cause remains unconfirmed.
+
+The sampler now records cgroup RAM/swap usage, optional peak counters, limits,
+`memory.events`, and scope memory pressure in timestamped `scope-memory.jsonl`
+records. Host pressure is still captured separately. Five consecutive sampling
+failures stop the import. A three-second sleeping process verified real cgroup
+reads with `memory.high=max`, `memory.max=5368709120`, and
+`memory.swap.max=536870912`, zero swap use, and zero reclaim/OOM events. Unity
+was not started by that probe. All 81 lightweight tests ran successfully, with
+two ROS-only skips; tests cover parsing, missing required counters, optional
+peaks, preservation of hard caps, pressure shutdown without a soft limit, and
+cleanup after telemetry failure. Shell syntax and whitespace checks passed.
+
+To avoid comparing a full import with a partly cached continuation, the Unity
+`Assets`, `Packages`, and `ProjectSettings` folders from the user's fresh checkout
+were copied into ignored `ROS1/build/import-limit-comparison/Unity/`, without a
+`Library` directory. The source checkout's tracked scene, script, settings, and
+package files had no changes. The isolated copy preserves the stopped checkout
+and provides a new cache for the proposed comparison; it is not a fresh OS or a
+controlled cold disk/package-download cache. No real comparison import has run.
+The current plan requires review of the command and host headroom before it runs;
+no automatic retry or cap increase is authorized.
+
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default
 remain unverified. A future live check should be scheduled only with sufficient
