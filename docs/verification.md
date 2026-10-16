@@ -918,11 +918,11 @@ working checkouts that predate this helper still use the file indicators. A
 regression test covers interrupted imports with apparently complete cache files.
 The final lightweight tool suite ran 77 tests, with two ROS-only skips.
 
-### Prepared comparison without the soft limit
+### Comparison without the soft limit
 
-The next proposed experiment changes only `MemoryHigh` from 4 GiB to unlimited;
+The approved comparison changed only `MemoryHigh` from 4 GiB to unlimited;
 `MemoryMax=5G`, `MemorySwapMax=512M`, the initial headroom check, timeout, and
-pressure shutdown stay in place. `--no-soft-limit` selects it explicitly; it is
+pressure shutdown stayed in place. `--no-soft-limit` selects it explicitly; it is
 not the default or a verified fix. The 4 GiB soft limit may have contributed to
 reclaim stalls in the previous run, but that run did not capture its event
 counters, so the cause remains unconfirmed.
@@ -944,9 +944,43 @@ were copied into ignored `ROS1/build/import-limit-comparison/Unity/`, without a
 `Library` directory. The source checkout's tracked scene, script, settings, and
 package files had no changes. The isolated copy preserves the stopped checkout
 and provides a new cache for the proposed comparison; it is not a fresh OS or a
-controlled cold disk/package-download cache. No real comparison import has run.
-The current plan requires review of the command and host headroom before it runs;
-no automatic retry or cap increase is authorized.
+controlled cold disk/package-download cache.
+
+The approved command ran once on 2026-10-16, starting at 20:26 with about 9.8 GiB
+host available RAM and zero reported full memory pressure. After about 79 seconds,
+the kernel killed the main Unity process for cgroup OOM. Scope shutdown finished
+after about 89 seconds. Unity was importing a warehouse lightmap at the end of its
+log; scene readiness was not reported. No `COMPLETE` marker was written.
+
+| Measurement | 4 GiB soft limit | No soft limit |
+| --- | --- | --- |
+| Sampled peak scope RAM | 4.02 GiB | 5.00 GiB |
+| Peak scope swap | 512 MiB | 512 MiB |
+| Lowest sampled available host RAM | 6.63 GiB | 5.14 GiB |
+| Highest sampled host full pressure `avg10` | 17.89% | 3.22% |
+| Termination | Pressure monitor stopped scope | Kernel killed Unity at scope hard cap |
+
+The new counters recorded `memory.high=max`, zero `high` events, and 21,967 `max`
+events in the last sample. That sample still showed zero OOM kills; the kernel
+journal captured the kill immediately afterward. Sampling can miss a terminal
+event when the scope disappears. The kernel recorded memory usage equal to the
+5 GiB limit, swap usage essentially equal to the 512 MiB limit, and
+`CONSTRAINT_MEMCG` for the trial scope. This confirms that the hard cap constrained
+this run; it does not establish the minimum RAM needed for import or prove the
+cause of the earlier soft-limit stalls. The workload was new-cache in both
+trials, but host activity and package/disk caches were not controlled.
+
+No trial Unity processes remained after cleanup. The queried journal window
+contained no other OOM victims. Normal startup and physical delivery were not
+attempted. No retry or increase in limits occurred. The default limits remain
+provisional; removing the soft limit alone did not make this import succeed.
+
+Logs are retained under
+`ROS1/build/import-limit-comparison/ROS1/build/unity-import-rio5h7/`, including
+`scope-memory.jsonl`, `memory.log`, `unity.log`, `scope.log`, `scope-journal.log`,
+and `kernel-oom.log`. The disposable Unity source/cache copy was removed after
+process shutdown; both original checkouts were preserved. A further live test
+requires a separate decision on the import workload or resource budget.
 
 Native Noetic on another Linux distribution, a newly created ROS container,
 optional CUDA installation, and physical delivery using the new CPU default

@@ -549,7 +549,9 @@ before scene readiness; see [measured results](docs/verification.md#controlled-i
 For a diagnostic comparison, `prepare_camera_demo_unity.sh --no-soft-limit`
 sets `MemoryHigh=infinity` while retaining the 5 GiB hard RAM cap, 512 MiB swap
 cap, timeout, and pressure shutdown. The default remains 4 GiB memory high until
-this experiment is evaluated. This flag is not a confirmed fix for import stalls.
+the budget is reviewed. The controlled no-soft-limit comparison reached the
+5 GiB hard cap and Unity was killed for cgroup OOM; this flag alone did not fix
+the import. See [comparison results](docs/verification.md#comparison-without-the-soft-limit).
 
 Every import now writes `scope-memory.jsonl` alongside host readings in
 `memory.log`. Scope samples contain memory and swap usage, available peak
