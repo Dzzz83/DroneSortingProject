@@ -798,7 +798,8 @@ For spectator checks, keep `MainWarehouse` open with Play stopped and choose
 `ROS1/build/spectator-views/` show start, elevated start, pickup hover, mid-carry,
 destination hover and release. The verifier waits for renderer transform updates
 between poses and restores the original drone pose without saving. It also runs
-after script compilation. The previews do not include a physically carried package.
+after script compilation, except during camera-demo launcher startup. The previews
+do not include a physically carried package.
 
 To compare another editor-only angle without recompiling, write a request in that
 output directory, for example:

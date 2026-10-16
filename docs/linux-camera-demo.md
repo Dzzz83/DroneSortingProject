@@ -1,0 +1,178 @@
+# Linux camera demo: advanced setup and troubleshooting
+
+For the normal setup and launch sequence, use the
+[README quick start](../README.md#linux-camera-demo-setup).
+
+## Additional prerequisites
+
+Install system packages using your distribution's package manager. Setup installs
+project dependencies; Unity and system packages must already be installed.
+
+- OpenCV needs `libGL` and GLib libraries on the host.
+- The scripts use Bash, `python3`, `flock`, `realpath`, and `sha256sum`.
+- Distrobox needs a working Podman or Docker installation.
+- A running systemd user manager enables memory isolation.
+- First-time dependency installation needs internet access.
+
+## ROS environment
+
+Choose native ROS Noetic on Ubuntu 20.04 or Distrobox. Unity and YOLO run on the
+host in both cases. Do not replace ROS's system Python with the detector's
+Python 3.11.
+
+For Distrobox, create the container once from your host terminal:
+
+```bash
+distrobox create --name ros-noetic --image docker.io/library/ros:noetic-ros-base-focal
+distrobox enter --name ros-noetic
+```
+
+Inside the container, install the build and ROS packages, then return to the host:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential ros-noetic-catkin ros-noetic-message-generation \
+  ros-noetic-message-filters ros-noetic-geometry-msgs ros-noetic-sensor-msgs \
+  ros-noetic-std-msgs ros-noetic-tf2-msgs
+exit
+```
+
+Native Noetic users install the same packages in their Ubuntu 20.04 environment
+after installing ROS; they do not need the container commands.
+
+The scripts prefer native ROS when `/opt/ros/noetic/setup.bash` exists. Otherwise,
+they use container `ros-noetic`. To override that choice, set `ROS_ENVIRONMENT`
+to `native` or `distrobox`; set `ROS_CONTAINER` to use another container name.
+Use the same values for setup and launch.
+
+ROS Noetic is end-of-life. The image tag and operating-system packages are not
+locked snapshots. See [ROS Noetic status](https://discourse.ros.org/t/ros-noetic-end-of-life-may-31-2025/43160).
+
+## Python path
+
+Setup normally finds `python3.11`. If yours has a different name or location:
+
+```bash
+DETECTOR_SETUP_PYTHON=/absolute/path/to/python3.11 bash ROS1/scripts/setup_camera_demo_linux.sh
+```
+
+Setup creates and uses `ROS1/build/detector-venv` automatically. Manual activation
+is unnecessary. It also fetches a pinned Endpoint and builds the linked Catkin
+workspace under `ROS1/build/`. It refuses to replace unrelated workspace packages
+or use an Endpoint checkout with local changes or a different revision.
+
+## Unity editor
+
+Standard Unity Hub paths for version 6000.6.0f1 are detected. For another location:
+
+```bash
+UNITY_EDITOR=/absolute/path/to/Editor/Unity bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+To manage the editor yourself instead of letting the launcher reopen it:
+
+```bash
+UNITY_MODE=manual bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+Open the repository's `Unity` directory, select `MainWarehouse`, and configure
+**Robotics → ROS Settings** for ROS1 at `127.0.0.1:10000`. Wait for `[READY]` in
+the terminal, then press Play. Manual mode does not check editor readiness.
+
+## NVIDIA GPU inference
+
+CPU inference is the default. With an NVIDIA driver compatible with CUDA 12.4:
+
+```bash
+bash ROS1/scripts/setup_camera_demo_linux.sh --gpu
+DETECTOR_DEVICE=0 bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+Set `DETECTOR_DEVICE=0` on subsequent GPU runs too. The latest startup checks used
+CPU inference; they did not validate this optional CUDA installation. Observations
+older than 1.5 seconds are rejected, so inference speed affects delivery.
+
+PyTorch is pinned to 2.5.1 and torchvision to 0.20.1. Other Python dependencies
+are in [detector.txt](../ROS1/requirements/detector.txt). See the
+[model notes](../ROS1/models/README.md) for provenance and licensing.
+
+## Memory and startup
+
+On the tested 16 GiB laptop, a fresh Unity-cache startup took about 8.5 minutes
+and a cached restart took about 40 seconds. Both produced repeated camera results
+and reached the observation flight phase. These startup checks stopped before
+physical pickup/drop; they do not establish minimum hardware requirements.
+
+With systemd available, host demo processes share an 8 GiB RAM / 2 GiB swap cap.
+The fresh run reached both limits without an OOM, so headroom remains tight.
+ROS inside Distrobox uses its container's resource group, outside the host cap.
+The cap does not reserve memory or guarantee other applications avoid pressure.
+
+| Setting | Purpose |
+| --- | --- |
+| `CAMERA_DEMO_MEMORY_MAX`, `CAMERA_DEMO_SWAP_MAX` | Override the RAM/swap caps. Check host capacity before increasing them. |
+| `CAMERA_DEMO_MEMORY_MODE` | `auto` uses systemd when available; `required` refuses startup without it; `off` disables isolation. |
+| `CAMERA_DEMO_MIN_AVAILABLE_GIB` | Optional positive minimum host available RAM checked before startup/restart. No minimum is enforced by default. |
+| `UNITY_STARTUP_TIMEOUT` | Seconds to wait for editor startup, default 600. |
+
+The launcher waits for editor startup work to settle before starting ROS/YOLO.
+If startup takes longer than expected, inspect `unity.log` for the remaining
+background tasks. Later actions or Play Mode can still increase memory use.
+
+Fresh editor preferences disable automatic Search indexing. For an existing
+checkout, turn off **Index on Editor startup** under **Edit → Preferences → Search**,
+then close Unity before rerunning. Existing preferences are otherwise preserved.
+
+Worker settings, cache behavior, and experimental import results are recorded in
+[startup verification](verification.md#fresh-clone-startup-after-the-memory-failure)
+and [controlled import experiments](verification.md#controlled-import-result).
+
+## Logs and troubleshooting
+
+Each run prints its directory under `ROS1/build/camera-demo-<timestamp>-<id>/`.
+
+| Log | Use it for |
+| --- | --- |
+| `unity.log` | Imports, shader compilation, editor readiness, connection/capture errors |
+| `detector.log` | YOLO service startup and errors |
+| `monitor.log` | Mission phases and vision results |
+| `build.log` | Catkin build failures |
+| `ros-logs/` | ROS node logs |
+
+Before Play, `IDLE` and `missing_synchronized_camera_data` are expected. During
+Play, look for repeated `DETECTIONS` or `NO_DETECTIONS`. If data remains missing,
+open **Window → General → Game**, confirm Play is active, and check Unity's Console.
+
+If a port is unavailable, identify its owner before stopping it. The demo needs
+ports `11311`, `10000`, and `10001`; it refuses to terminate unrelated services.
+A `git pull --ff-only` failure means branch history needs resolving before setup;
+do not reset away local work to follow the guide.
+
+Normal Ctrl+C stops ROS and YOLO while leaving Unity open. Relaunching replaces
+this project's previous demo processes. Save editor changes first. Recovery scenes
+left by shutdown are preserved in the new run's `unity-scene-backups/` directory.
+
+## Other paths
+
+Use these consistently during setup and launch when overriding defaults:
+
+| Variable | Default |
+| --- | --- |
+| `DETECTOR_PYTHON` | `ROS1/build/detector-venv/bin/python` |
+| `DETECTOR_WEIGHTS` | `ROS1/models/package_detector.pt` |
+| `ROS_TCP_ENDPOINT_SOURCE` | `ROS1/build/ROS-TCP-Endpoint` |
+| `CAMERA_DEMO_WORKSPACE` | `ROS1/build/linux-camera-workspace` |
+
+## Spectator checks and optional import diagnostics
+
+The spectator view is independent of the mounted RGB-depth sensor. It stays in
+the central aisle at Unity X=34 m, Y=6.5 m, follows 8 m ahead along Z, and stops at
+Z=50 m. For clearance checks and six rendered previews, choose **Drone Delivery →
+Verify Warehouse Spectator Clearance** with Play stopped. See
+[spectator verification](verification.md#launcher-and-spectator-verification).
+
+`prepare_camera_demo_unity.sh` is an optional Unity-only import experiment, outside
+normal setup/run. Its stricter budgets failed to finish the recorded imports;
+they are not demo hardware requirements. See the
+[diagnostic procedure and results](verification.md#separate-import-and-cached-startup)
+for limits, memory sampling, timeout behavior, and completion checks.
