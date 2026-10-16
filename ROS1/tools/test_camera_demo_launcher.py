@@ -160,7 +160,13 @@ log = pathlib.Path(sys.argv[sys.argv.index('-logFile') + 1])
 assert '-refreshImportMode' not in sys.argv
 assert '-gc-helper-count' not in sys.argv
 assert sys.argv[sys.argv.index('-job-worker-count') + 1] == '4'
+assert sys.argv[sys.argv.index('-desiredWorkerCount') + 1] == '1'
+assert sys.argv[sys.argv.index('-standbyWorkerCount') + 1] == '1'
+assert sys.argv[sys.argv.index('-idleWorkerShutdownDelay') + 1] == '1000'
+assert sys.argv[sys.argv.index('-executeMethod') + 1] == 'DeliveryDemoSceneLauncher.PrepareMainWarehouseForCameraDemo'
 log.write_text('Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity\\n')
+time.sleep(1)
+log.write_text(log.read_text() + 'CAMERA_DEMO_EDITOR_IDLE\\n')
 time.sleep(30)
 ''')
             editor.chmod(0o755)
@@ -177,6 +183,27 @@ open_unity
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(backups.exists())
             self.assertEqual((run / 'unity-scene-backups/0.backup').read_text(), 'recoverable scene')
+            preferences = root / 'Unity/UserSettings/Search.settings'
+            self.assertEqual(preferences.read_text(), 'indexOnEditorStartup = false\n')
+
+            # A scene-open log alone must not start services, and user settings
+            # must survive repeated launches even when indexing is enabled.
+            preferences.write_text('indexOnEditorStartup = true\nfetchPreview = false\n')
+            editor.write_text('''#!/usr/bin/env python3
+import pathlib, sys, time
+pathlib.Path(sys.argv[sys.argv.index('-logFile') + 1]).write_text(
+    'Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity\\n')
+time.sleep(30)
+''')
+            (run / 'unity.log').unlink()
+            result = subprocess.run(['bash', '-c', command, 'bash', str(definitions), str(run)],
+                                    env=dict(os.environ, PROJECT_ROOT=str(root), UNITY_EDITOR=str(editor),
+                                             UNITY_STARTUP_TIMEOUT='1'),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('ROS and YOLO have not started', result.stderr)
+            self.assertEqual(preferences.read_text(),
+                             'indexOnEditorStartup = true\nfetchPreview = false\n')
 
     @unittest.skipUnless(Path('/opt/ros/noetic/setup.bash').exists(), 'Requires ROS Noetic')
     def test_existing_workspace_package_is_preserved(self):

@@ -51,6 +51,10 @@ public static class WarehouseSpectatorCameraVerification
         EditorApplication.update += CheckPreviewRequest;
         EditorApplication.delayCall += () =>
         {
+            // Rendering six diagnostic previews starts HDRP shader compilation
+            // during the demo's import peak. Keep this check available on demand.
+            if (Environment.GetCommandLineArgs().Contains(
+                    "DeliveryDemoSceneLauncher.PrepareMainWarehouseForCameraDemo")) return;
             if (!EditorApplication.isPlayingOrWillChangePlaymode &&
                 SceneManager.GetActiveScene().name == "MainWarehouse")
                 Verify();

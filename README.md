@@ -228,7 +228,7 @@ Warehouse obstacle avoidance is disabled by default until the warehouse sensor r
 | `run_warehouse_ros_demo.sh` | Runs the fixed-coordinate `MainWarehouse` delivery on Linux or WSL2 |
 | `setup_camera_demo_linux.sh` | Installs pinned detector dependencies and prepares the camera ROS workspace |
 | `prepare_camera_demo_unity.sh` | Imports Unity alone with bounded memory and pressure monitoring |
-| `run_camera_delivery_demo.sh` | Restarts the camera demo, prepares ROS/YOLO, opens `MainWarehouse`, and waits for manual Play |
+| `run_camera_delivery_demo.sh` | Restarts the camera demo, prepares the workspace, waits for Unity startup to settle, then starts YOLO/ROS for manual Play |
 | `prepare_camera_demo_ros.sh` | Links and incrementally builds a dedicated Catkin workspace without replacing the existing package |
 | `start_camera_demo_ros.sh` | Starts ROS, checks node/endpoint readiness, monitors the mission, and cleans up its ROS processes |
 | `watch_obstacles.sh` | Displays Unity obstacle sensor readings |
@@ -439,6 +439,11 @@ https://github.com/Unity-Technologies/ROS-TCP-Endpoint
 
 ROS Noetic can run directly on Ubuntu 20.04 or inside an Ubuntu 20.04 Distrobox container.
 
+For the **camera-guided delivery demo with YOLO**, go directly to
+[Linux camera demo setup](#linux-camera-demo-setup). That setup creates its own
+workspace and installs the Endpoint; the manual workspace steps below are for
+the fixed-coordinate workflow.
+
 Clone the repository and create the Catkin workspace:
 
 ```bash
@@ -483,16 +488,39 @@ model is included in Git; setup installs dependencies without training.
 
 #### Linux camera demo setup
 
-The initial portability target is **x86-64 host Linux**, Unity `6000.6.0f1`,
-Python **3.11** with `venv`/`pip`, Git/Git LFS, and either native ROS Noetic or
-Distrobox with an Ubuntu 20.04 Noetic container. The host also needs a working
-Unity graphics environment and OpenCV's `libGL`/GLib libraries. Install these
-prerequisites through your distribution; setup does not install system packages
-or Unity. Ubuntu 20.04's default Python 3.8 is for ROS; install Python 3.11
-separately on the host for the detector. Set `DETECTOR_SETUP_PYTHON` if its binary
-is not named `python3.11`.
+Use this guide for the RGB-depth/YOLO delivery demo on **x86-64 host Linux**.
+Run host commands in your normal terminal, outside the ROS container, from the
+repository root unless a step says otherwise. The trained model is included;
+you do not need to train it.
 
-For Distrobox, create the environment once (requires Podman or Docker):
+##### 1. Install prerequisites
+
+Setup installs project dependencies, but it does **not** install Unity or system
+packages. Install these first using the appropriate tools for your distribution:
+
+| Prerequisite | What is needed |
+| --- | --- |
+| Unity | Editor **6000.6.0f1**, activated and able to open projects on your desktop. Unity Hub's standard installation path is detected automatically. |
+| Host Python | **Python 3.11** with `venv` and `pip`, plus `python3` for launcher helpers. Do not replace ROS's system Python. |
+| Git and Git LFS | Both commands must be installed. `git lfs install` configures an installed Git LFS; it does not install the package. |
+| ROS | Native ROS Noetic on Ubuntu 20.04, or the Distrobox environment below. |
+| Container tools, if using Distrobox | Distrobox and a working Podman or Docker installation. Native ROS users do not need these. |
+| Graphics and libraries | A working Linux desktop/graphics driver for Unity, and OpenCV's `libGL` and GLib libraries. |
+| Host utilities | Bash, `flock`, `realpath`, and `sha256sum`. A running systemd user manager enables the launcher's memory isolation. |
+
+Internet access is needed to obtain dependencies during first-time setup.
+The tested laptop has 16 GiB RAM; the fresh-cache run reached the demo's default
+8 GiB RAM / 2 GiB swap caps. This is a tested configuration, **not a verified
+minimum requirement or a guarantee for every Linux machine**. See the
+[startup verification](docs/verification.md#fresh-clone-startup-after-the-memory-failure).
+
+Choose one ROS environment:
+
+- **Native ROS Noetic:** use your installed Ubuntu 20.04 Noetic environment and
+  install the ROS/build packages listed in the `apt-get install` command below.
+  Skip container creation and `distrobox enter`/`exit`.
+- **Distrobox:** after installing Distrobox and Podman or Docker, create and
+  prepare the container once. Only the package-install commands run inside it:
 
 ```bash
 distrobox create --name ros-noetic --image docker.io/library/ros:noetic-ros-base-focal
@@ -504,39 +532,167 @@ sudo apt-get install -y build-essential ros-noetic-catkin ros-noetic-message-gen
 exit
 ```
 
-Native ROS users install the same ROS/build packages in their Ubuntu 20.04
-Noetic environment. ROS Noetic is end-of-life; the existing ROS 1 architecture
-is retained here. The container image tag and operating-system packages are not
-locked snapshots. See [ROS Noetic status](https://discourse.ros.org/t/ros-noetic-end-of-life-may-31-2025/43160).
+The scripts select native ROS when `/opt/ros/noetic/setup.bash` exists, otherwise
+Distrobox container `ros-noetic`. Set `ROS_ENVIRONMENT=native` or
+`ROS_ENVIRONMENT=distrobox` to choose explicitly; set `ROS_CONTAINER` for another
+container name. Use the same choices during setup and launch.
 
-From a fresh clone, after installing Git LFS:
+ROS Noetic is end-of-life; this guide retains the project's existing ROS 1
+architecture. The container tag and operating-system packages are not locked
+snapshots. See [ROS Noetic status](https://discourse.ros.org/t/ros-noetic-end-of-life-may-31-2025/43160).
+
+##### 2. Get the demo branch and assets
+
+Until these changes are merged, use `feat/linux-portable-setup`.
+Choose **one** of the following paths.
+
+**New clone:**
 
 ```bash
 git lfs install
-git clone https://github.com/Dzzz83/DroneSortingProject.git
+git clone --branch feat/linux-portable-setup https://github.com/Dzzz83/DroneSortingProject.git
 cd DroneSortingProject
 git lfs pull
+```
+
+**Existing checkout:** open a terminal at its repository root. Check `git status`
+and save or commit your local changes before switching branches; do not discard
+work to follow this guide. Then fetch the published branch updates and assets:
+
+```bash
+git fetch origin
+git switch feat/linux-portable-setup
+git pull --ff-only
+git lfs install
+git lfs pull
+```
+
+If `git pull --ff-only` reports diverging history, resolve the branch history
+before continuing. These commands do not reset your checkout.
+
+##### 3. Run first-time project setup
+
+Back in the **host terminal** at the repository root:
+
+```bash
+python3.11 --version
 bash ROS1/scripts/setup_camera_demo_linux.sh
+```
+
+Setup fetches the pinned ROS-TCP-Endpoint, creates the detector virtual environment
+at `ROS1/build/detector-venv`, installs pinned Python dependencies, checks the
+included model, performs CPU inference, and builds the dedicated ROS workspace.
+**Do not create or activate a venv manually.** Generated dependencies stay under
+ignored `ROS1/build/`; setup does not require the manual Endpoint/workspace steps
+above.
+
+If your Python 3.11 executable has a different name or path, select it explicitly:
+
+```bash
+DETECTOR_SETUP_PYTHON=/absolute/path/to/python3.11 bash ROS1/scripts/setup_camera_demo_linux.sh
+```
+
+Wait for `[OK] Setup complete` before launching. Setup supports repeated runs;
+stop any running launcher before rerunning it. Rerun setup after updates that
+change dependencies or when its generated environment/workspace is missing.
+It refuses to replace unrelated workspace packages or modify an existing Endpoint
+checkout with a different revision or local changes.
+
+##### 4. Run the demo
+
+For normal runs after successful setup, use just this command from the repository
+root in the host terminal. **Save Unity edits first:** the launcher closes this
+project's previous editor and services before starting a new run.
+
+```bash
 bash ROS1/scripts/run_camera_delivery_demo.sh
 ```
 
-Until the portability branch is merged, check out `feat/linux-portable-setup`
-before running setup. Wait for `READY`, then press **Play** in Unity. Setup
-fetches a pinned ROS-TCP-Endpoint, creates a Python 3.11 detector environment,
-checks the included model, performs CPU inference, and builds a dedicated Catkin
-workspace. It supports repeated runs and refuses to replace unrelated workspace
-packages or change an existing Endpoint checkout. Stop the launcher before
-rerunning setup. Internet access is needed for the first dependency installation.
-Generated dependencies stay under ignored `ROS1/build/`.
+The launcher builds the ROS workspace, opens `MainWarehouse`, waits for Unity
+startup activity to settle, then starts the YOLO detector and ROS camera delivery.
+It opens a Game tab without resetting your other editor windows.
 
-The normal launcher opens Unity directly, including on a fresh checkout. Unity
-imports assets as needed. No separate preparation command, cache-completion
-marker, or minimum-free-RAM threshold is required. With systemd available, the
-normal scope retains main's 8 GiB RAM / 2 GiB swap limits. These are caps, not
-memory reservations or guarantees against pressure on other applications.
+1. **Wait for `[READY]` in the terminal before pressing Play.** The scene can
+   appear while Unity is still compiling graphics shaders. On the tested machine,
+   a fresh-cache startup took about 8.5 minutes; a cached restart took about
+   40 seconds. Times depend on the machine.
+2. Press **Play** in Unity. Keep Unity running and leave the launcher terminal open.
+3. Watch the terminal for mission phases and vision results. Before Play,
+   `IDLE` and `UNAVAILABLE: missing_synchronized_camera_data` are expected. During
+   Play, camera results include `DETECTIONS` or `NO_DETECTIONS`; those results
+   alone do not prove a completed pickup/drop.
+4. Press **Ctrl+C** in the launcher terminal to stop this run's ROS and detector.
+   Normal Ctrl+C shutdown leaves Unity open. Running the launcher again starts
+   a fresh demo and closes that editor first.
 
-`prepare_camera_demo_unity.sh` is an **optional diagnostic tool**, outside the
-normal setup/run sequence. It starts only Unity in batch mode with sequential
+Keep the generated `Unity/Library` cache between runs to avoid repeating the full
+import. No separate Unity preparation command is required. The default systemd
+scope caps host demo processes at 8 GiB RAM / 2 GiB swap; these are caps, not
+reservations or protection guarantees for other applications. The tested budget
+remains tight. Latest startup checks verified repeated camera results and flight
+to the observation phase, **not a full physical pickup/drop mission**.
+
+##### Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| `git: 'lfs' is not a git command` | Install your distribution's Git LFS package, then run `git lfs install` and `git lfs pull` in the checkout. |
+| Setup asks for Python 3.11 | Install host Python 3.11 with venv/pip support, or use `DETECTOR_SETUP_PYTHON` as shown above. Setup creates the venv for you. |
+| Unity Editor not found | Install version 6000.6.0f1 or set `UNITY_EDITOR` to its executable, as shown below. |
+| Missing Unity LFS assets | Run `git lfs pull` on the demo branch before setup. The model itself is included directly in Git. |
+| Unity is open but the terminal has not printed `[READY]` | Wait for imports and shader compilation. Inspect `unity.log` in the run's log directory; it reports background tasks still running. `UNITY_STARTUP_TIMEOUT` sets the wait limit in seconds (default 600). |
+| Missing camera data continues during Play | Open **Window → General → Game**, check that Play is active, and inspect Unity's Console and the run logs for connection or capture errors. Manual editor mode needs ROS at `127.0.0.1:10000`. |
+| A port is unavailable | Ports `11311`, `10000`, and `10001` must be free. The launcher reports unrelated services rather than terminating them; identify the service before stopping it. |
+| Linux kills the isolated demo for memory exhaustion | The demo reached a scope memory constraint. Inspect the run logs and journal; this does not necessarily mean all host RAM was exhausted. Avoid increasing or disabling caps without checking available host memory. |
+
+Each run prints its log directory under `ROS1/build/camera-demo-<timestamp>-<id>/`.
+Start with `unity.log`, `detector.log`, `monitor.log`, and `build.log`; ROS node
+logs are under `ros-logs/`. Run logs are retained for diagnosis.
+
+Existing editor preferences are preserved. To avoid automatic Search indexing
+in a checkout that already has preferences, turn off **Index on Editor startup**
+under **Edit → Preferences → Search**, then close Unity before rerunning. The
+launcher disables this setting automatically only when creating fresh preferences.
+
+##### Optional GPU, editor paths, and diagnostics
+
+CPU inference is the default. For an NVIDIA driver compatible with CUDA 12.4:
+
+```bash
+bash ROS1/scripts/setup_camera_demo_linux.sh --gpu
+DETECTOR_DEVICE=0 bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+The CPU and CUDA builds use PyTorch 2.5.1 and torchvision 0.20.1; other host Python
+dependencies are pinned in `ROS1/requirements/detector.txt`. The Unity connector
+and ROS Endpoint use fixed Git revisions. CPU inference speed depends on the
+machine; observations exceeding the 1.5 s freshness limit are rejected, so
+successful setup alone does not prove delivery performance. Optional CUDA setup
+has not been validated by the latest startup tests. Model provenance and upstream
+licensing are in [the model notes](ROS1/models/README.md).
+
+For a custom Unity installation, set its executable path when launching:
+
+```bash
+UNITY_EDITOR=/absolute/path/to/Editor/Unity bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+To keep control of your existing editor, launch with:
+
+```bash
+UNITY_MODE=manual bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+Manual mode preserves your open editor and starts the backend without checking
+editor readiness. Open the repository's `Unity` directory in version 6000.6.0f1,
+select `MainWarehouse`, configure ROS at `127.0.0.1:10000`, and press Play after
+`[READY]`. For other environment/path overrides and memory controls, see
+[Camera-guided single-package delivery](#camera-guided-single-package-delivery).
+
+<details>
+<summary>Optional Unity import diagnostic (outside normal setup/run)</summary>
+
+`prepare_camera_demo_unity.sh` starts only Unity in batch mode with sequential
 imports, two job workers, and one GC helper, then exits after scene opening.
 It requires a systemd user manager, Linux memory pressure reporting, and readable
 cgroup v2 memory counters. Its default experimental budget is 4 GiB memory high,
@@ -546,42 +702,16 @@ hard cap and a 9 GiB initial headroom check. These stricter experiments stopped
 before completing import; they do not establish normal demo requirements.
 See [measured results](docs/verification.md#controlled-import-result).
 
-The optional diagnostic samples host and scope memory each second. It stops
-after five consecutive checks below 2 GiB available host RAM or at least 10%
-full host pressure (`avg10`), five scope-sampling failures, or 600 seconds.
+The diagnostic samples host and scope memory each second. It stops after five
+consecutive checks below 2 GiB available host RAM or at least 10% full host
+pressure (`avg10`), five scope-sampling failures, or 600 seconds.
 `UNITY_IMPORT_TIMEOUT` accepts 1–600 seconds; the scope also has an independent
-runtime limit. Logs and cgroup usage/reclaim/OOM counters are retained under
-`ROS1/build/unity-import-*/`. Diagnostic cache checks require the latest run's
-`COMPLETE` marker as well as asset databases and the compiled assembly. The
-normal launcher does not use these diagnostic completion checks.
+runtime limit. Logs and cgroup counters remain under `ROS1/build/unity-import-*/`.
+Diagnostic cache checks require the latest run's `COMPLETE` marker, asset databases,
+and the compiled assembly. The normal launcher does not use these completion
+checks.
 
-CPU inference is the default. For an NVIDIA driver compatible with CUDA 12.4:
-
-```bash
-bash ROS1/scripts/setup_camera_demo_linux.sh --gpu
-DETECTOR_DEVICE=0 bash ROS1/scripts/run_camera_delivery_demo.sh
-```
-
-The CPU and CUDA builds use PyTorch 2.5.1 and torchvision 0.20.1; the remaining
-host Python dependencies are pinned in `ROS1/requirements/detector.txt`.
-The Unity ROS connector and ROS Endpoint use fixed Git revisions. CPU inference
-speed depends on the machine; observations exceeding the existing 1.5 s freshness
-limit are rejected, so successful setup alone does not prove delivery performance.
-Model provenance and upstream licensing are in [the model notes](ROS1/models/README.md).
-
-The launcher detects standard Unity Hub paths for the required version. For a
-custom installation or an editor you want to open yourself:
-
-```bash
-UNITY_EDITOR=/path/to/Editor/Unity bash ROS1/scripts/run_camera_delivery_demo.sh
-UNITY_MODE=manual bash ROS1/scripts/run_camera_delivery_demo.sh
-```
-
-Manual mode preserves your open editor. Open the repository's `Unity` directory,
-select `MainWarehouse`, configure ROS at `127.0.0.1:10000`, and press Play after
-ROS is ready. Automatic mode closes this project's previous editor; save edits
-before launching. Missing dependencies and occupied ports produce diagnostic
-errors rather than stopping unrelated services.
+</details>
 
 The existing fixed-coordinate workflow below does not need YOLO.
 
@@ -795,8 +925,11 @@ See [full-workflow evidence](docs/verification.md#full-workflow-from-dronestart)
 Pickup coordinates come from RGB-depth observations; the observation waypoint,
 destination, and travel heights are configured.
 
+Complete [Linux camera demo setup](#linux-camera-demo-setup) once on each machine.
+For subsequent runs, launch from the repository root:
+
 ```bash
-# One-command host Linux startup; wait for READY, then press Play in Unity:
+# Host Linux startup; wait for READY, then press Play in Unity:
 bash ROS1/scripts/run_camera_delivery_demo.sh
 
 # In the sourced ROS environment, with the detector running and Unity at DroneStart:
@@ -805,8 +938,9 @@ roslaunch drone_sorting camera_delivery.launch
 
 Each invocation first stops this project's previous camera demo ROS/build
 processes (including Distrobox), YOLO worker, and Unity editor/import workers.
-It then incrementally builds the dedicated linked catkin workspace, starts fresh
-YOLO and ROS services, and reopens `MainWarehouse` with Play Mode off. Save Unity
+It then incrementally builds the dedicated linked catkin workspace, reopens
+`MainWarehouse` with Play Mode off, waits for editor startup activity to settle,
+and starts fresh YOLO and ROS services. Save Unity
 edits before running: a restart closes this project's editor, including an editor
 opened manually. The old `--reuse-editor` option is no longer supported.
 
@@ -834,8 +968,9 @@ independent of the mounted RGB-depth camera.
 
 With MainWarehouse open and Play stopped, **Drone Delivery → Verify Warehouse
 Spectator Clearance** checks 105 route positions and renders six previews into
-`ROS1/build/spectator-views/`. It also runs after script compilation and restores
-the drone's original pose without saving. Rendered images must be reviewed because
+`ROS1/build/spectator-views/`. It also runs after script compilation, except during
+camera-demo launcher startup, and restores the drone's original pose without
+saving. Rendered images must be reviewed because
 collider checks cannot detect every visual obstruction. Diagnostic requests and
 verification results are in [launcher and spectator verification](docs/verification.md#launcher-and-spectator-verification).
 
@@ -859,15 +994,21 @@ disables it. There is no default available-RAM threshold or cache admission gate
 before services start or any editor closes. This check is independent of the
 optional import diagnostics and does not reserve memory.
 
-Unity launches with four job workers, as on main, without forcing import mode or
-GC helper settings. `UNITY_STARTUP_TIMEOUT` sets the scene startup timeout in
-seconds (default 600, allowing more time for fresh imports than main's fixed 180
-seconds). Without a scope, no launcher memory cap is applied.
+Unity launches with four job workers and one desired asset import worker, without
+forcing import mode or GC helper settings. The launcher waits for ten continuous
+seconds without editor imports, script/shader compilation, or running Progress
+tasks before starting YOLO and ROS. Wait for `[READY]` before pressing Play; scene
+opening alone does not finish background startup work. The launcher also opens a
+Game tab without resetting other editor windows. This idle check cannot
+guarantee that later editor actions or Play Mode will fit within the memory cap.
+`UNITY_STARTUP_TIMEOUT` sets the editor startup timeout in seconds (default 600).
+Without a scope, no launcher memory cap is applied. A memory failure reports the
+scope's RAM/swap allowance; it does not necessarily mean all host memory was used.
 Builds use two jobs; ROS in Distrobox uses the container's resource group. Each
 run retains logs and helper snapshots under
 `ROS1/build/camera-demo-<timestamp>-<id>/`. Limits do not guarantee sufficient RAM.
-See [Linux portability verification](docs/verification.md#linux-portability-verification)
-for the failed fresh import and remaining checks.
+See [startup verification](docs/verification.md#fresh-clone-startup-after-the-memory-failure)
+for measured fresh-cache/cached runs and remaining limitations.
 
 Use the same detector with `--context-scale 1.5` and read-only recorder as the
 pickup trial. Set `DRONE_PICKUP_TRIAL_MISSION=delivery` when starting

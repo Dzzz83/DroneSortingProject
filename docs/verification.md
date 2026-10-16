@@ -1076,6 +1076,56 @@ optional CUDA installation, and physical delivery using the new CPU default
 remain unverified. A future live check should be scheduled only with sufficient
 memory headroom; the scope limit alone did not protect other applications.
 
+### Fresh-clone startup after the memory failure
+
+On 2026-10-16 at 21:13:58 local time, the user's normal fresh-clone run exhausted
+its 8 GiB RAM / 2 GiB swap scope. The kernel recorded `CONSTRAINT_MEMCG` and killed
+the Unity editor. Three import workers and multiple shader compilers were active.
+The scene-open message preceded background Search indexing, so the launcher had
+reported READY before startup work finished. This establishes a demo-scope limit
+failure, rather than proving that all host memory was exhausted.
+
+The revised launcher requests one desired and one standby import worker, with a
+one-second idle shutdown delay for surplus workers. Unity 6000.6 rejected zero
+standby workers in an initial trial; the final configuration uses one. Fresh
+Search preferences disable automatic startup indexing; existing preferences are
+preserved. Automatic spectator diagnostic previews are skipped for this launcher,
+while the explicit verification command remains available. The launcher opens a
+Game view and waits for ten idle seconds across imports, script/shader compilation,
+and Progress tasks before allocating YOLO or starting ROS. The wait log identifies
+remaining tasks, including HDRP compute-variant compilation.
+
+The final disposable snapshot used tracked project inputs including these changes,
+no Unity Library/UserSettings cache, and hash-verified materialized LFS assets.
+It reused the installed detector environment, Endpoint source, and existing
+Distrobox; this was a fresh Unity-cache startup test, not a fresh-machine install.
+The 8 GiB RAM / 2 GiB swap limits were unchanged. A separate monitor sampled
+cgroup counters and host memory each second, stopping the owned test processes
+after five consecutive readings below 2 GiB available host RAM or at least 10%
+full memory pressure (`avg10`).
+
+The fresh-cache run reached READY after about 8.5 minutes, including substantial
+HDRP compute-variant compilation after scene opening. Play Mode then produced
+repeated `DETECTIONS`/`NO_DETECTIONS` results and advanced to `GO_TO_OBSERVATION`.
+The scope reached both caps, but recorded zero OOM events or kills; the lowest
+sampled host available RAM was 2.04 GiB, and no pressure guard checks failed.
+This remains a tight memory budget, not evidence of spare capacity or a minimum
+hardware requirement. A preceding cached trial without a Game view received one
+camera result and then failed with `position_feedback_unavailable`; it did not
+validate sustained camera updates. No physical pickup/drop success is claimed.
+
+A cached restart of the final configuration also reached READY and produced
+repeated camera results through `GO_TO_OBSERVATION`. Its recorded peaks were
+7.88 GiB scope RAM and 1.30 GiB swap, with zero OOM kills and at least 2.27 GiB
+available host RAM. Both final runs were stopped after the startup/camera smoke
+check rather than running the full pickup/drop mission.
+
+The full lightweight host-tool suite passed 84 tests with two ROS-only skips.
+Shell syntax and whitespace checks passed. The final C# code compiled and ran in
+Unity 6000.6.0f1. Final trial logs and memory samples are retained under ignored
+`ROS1/build/startup-memory-fix-final-results/`; disposable source/cache copies are
+removed after all their processes stop.
+
 ## What remains unverified
 
 - Detector/localization performance outside the tested synthetic warehouse cases,

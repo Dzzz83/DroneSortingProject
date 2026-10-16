@@ -41,7 +41,7 @@ isolate_demo_processes() {
         exit_status=$?
     fi
     if [[ "$(systemctl --user show "$scope" --property=Result --value 2>/dev/null)" == oom-kill ]]; then
-        echo '[FAIL] Linux stopped the isolated demo for memory exhaustion. Inspect the run logs and system journal.' >&2
+        echo "[FAIL] Demo scope exhausted its ${CAMERA_DEMO_MEMORY_MAX:-8G} RAM / ${CAMERA_DEMO_SWAP_MAX:-2G} swap allowance; Linux killed a demo process. Inspect unity.log and journalctl --user -u $scope." >&2
     fi
     exit "$exit_status"
 }
@@ -145,6 +145,12 @@ open_unity() {
         echo "[INFO] Open $PROJECT_ROOT/Unity in Unity 6000.6.0f1, select MainWarehouse, connect to 127.0.0.1:10000, then press Play."
         return
     fi
+    # Search indexing is optional editor tooling, not a camera-demo dependency.
+    # Seed fresh preferences before Unity starts; preserve existing user choices.
+    mkdir -p "$PROJECT_ROOT/Unity/UserSettings"
+    if [[ ! -e "$PROJECT_ROOT/Unity/UserSettings/Search.settings" ]]; then
+        printf 'indexOnEditorStartup = false\n' > "$PROJECT_ROOT/Unity/UserSettings/Search.settings"
+    fi
     # Process shutdown can leave Unity's recovery scenes behind. Keep them for
     # recovery, but reopen the saved scene without an interactive backup dialog.
     if [[ -d "$PROJECT_ROOT/Unity/Temp/__Backupscenes" ]]; then
@@ -152,17 +158,16 @@ open_unity() {
         echo "[RESTART] Preserved Unity recovery scenes: $RUN_DIR/unity-scene-backups"
     fi
     "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -job-worker-count 4 \
-        -executeMethod DeliveryDemoSceneLauncher.OpenMainWarehouse \
+        -desiredWorkerCount 1 -standbyWorkerCount 1 -idleWorkerShutdownDelay 1000 \
+        -executeMethod DeliveryDemoSceneLauncher.PrepareMainWarehouseForCameraDemo \
         -logFile "$RUN_DIR/unity.log" > "$RUN_DIR/unity-start.log" 2>&1 &
     UNITY_PID=$!
     for ((attempt=0; attempt<${UNITY_STARTUP_TIMEOUT:-600}; attempt++)); do
-        kill -0 "$UNITY_PID" 2>/dev/null || { tail -30 "$RUN_DIR/unity.log"; fail 'Unity exited before opening the scene.'; }
-        kill -0 "$DETECTOR_PID" 2>/dev/null || fail 'Detector exited while Unity was loading.'
-        kill -0 "$ROS_WRAPPER_PID" 2>/dev/null || fail 'ROS exited while Unity was loading.'
-        if [[ -f "$RUN_DIR/unity.log" ]] && grep -q 'Delivery demo scene ready: Assets/Scenes/MainWarehouse.unity' "$RUN_DIR/unity.log"; then return 0; fi
+        kill -0 "$UNITY_PID" 2>/dev/null || { tail -30 "$RUN_DIR/unity.log"; fail 'Unity exited before startup activity settled; inspect unity.log.'; }
+        if [[ -f "$RUN_DIR/unity.log" ]] && grep -q 'CAMERA_DEMO_EDITOR_IDLE' "$RUN_DIR/unity.log"; then return 0; fi
         sleep 1
     done
-    fail 'Unity scene readiness timed out; inspect unity.log.'
+    fail 'Unity did not finish startup activity before the timeout; inspect unity.log. ROS and YOLO have not started.'
 }
 
 check_dependencies "$@"
@@ -199,22 +204,22 @@ echo "[1/4] Preparing ROS workspace. Logs: $RUN_DIR"
 ROS_WRAPPER_PID=$!
 wait "$ROS_WRAPPER_PID" || { tail -40 "$RUN_DIR/build.log"; fail 'ROS preparation failed.'; }
 ROS_WRAPPER_PID=''
-echo '[2/4] Starting the YOLO detector on the host.'
+echo '[2/4] Opening MainWarehouse; waiting for editor background work. Wait for READY before pressing Play.'
+# Keep ROS and detector allocations out of Unity's first-import peak.
+open_unity 8>&- 9>&-
+echo '[3/4] Starting the YOLO detector on the host.'
 CAMERA_DEMO_RUN_DIR="$RUN_DIR" "$DETECTOR_PYTHON" "$PROJECT_ROOT/ROS1/tools/package_detector_service.py" \
     --weights "$DETECTOR_WEIGHTS" --device "$DETECTOR_DEVICE" --confidence 0.25 --image-size 640 --context-scale 1.5 \
     > "$RUN_DIR/detector.log" 2>&1 8>&- 9>&- &
 DETECTOR_PID=$!
 wait_for_detector
 
-echo '[3/4] Starting ROS camera delivery.'
+echo '[4/4] Starting ROS camera delivery.'
 "${ROS_RUNNER[@]}" "$RUN_DIR/start_camera_demo_ros.sh" "$PROJECT_ROOT" "$WORKSPACE" "$RUN_DIR" \
     > "$RUN_DIR/ros-supervisor.log" 2>&1 8>&- 9>&- &
 ROS_WRAPPER_PID=$!
 wait_for_ros
 
-echo '[4/4] Opening MainWarehouse in Unity.'
-# The editor must not inherit either launcher lock.
-open_unity 8>&- 9>&-
 # A subsequent invocation can now replace this run.
 flock -u 8
 exec 8>&-
