@@ -21,15 +21,18 @@ fail() { echo "[FAIL] $*" >&2; exit 1; }
 isolate_demo_processes() {
     # Unity and its workers must not share the terminal/Codex OOM group. The
     # scope lives until its last process exits, including an editor left open.
-    if [[ -n "${CAMERA_DEMO_SCOPE:-}" ]] && grep -Fq "/$CAMERA_DEMO_SCOPE" /proc/self/cgroup; then
+    if [[ -n "${CAMERA_DEMO_SCOPE:-}" ]] && grep -Fq "/$CAMERA_DEMO_SCOPE" /proc/self/cgroup 2>/dev/null; then
         return
     fi
     [[ "$MEMORY_MODE" != off ]] || return 0
-    if ! command -v systemd-run >/dev/null || ! systemctl --user show-environment >/dev/null 2>&1; then
-        [[ "$MEMORY_MODE" != required ]] || fail 'Memory isolation requires a running systemd user manager.'
-        echo '[INFO] Running without a systemd memory scope; monitor host memory usage.'
-        return
+
+    # Probe systemd-run and polkit authorization active test
+    if ! command -v systemd-run >/dev/null || ! systemctl --user show-environment >/dev/null 2>&1 || ! systemd-run --user --scope --quiet true 2>/dev/null; then
+        [[ "$MEMORY_MODE" != required ]] || fail 'Memory isolation requires a running systemd user manager with polkit authorization.'
+        echo '[INFO] Running without a systemd memory scope (polkit/systemd-run authorization unavailable); monitoring host memory usage.'
+        return 0
     fi
+
     local scope="camera-delivery-$(date +%s)-$$.scope"
     echo "[SETUP] Isolating demo processes (${CAMERA_DEMO_MEMORY_MAX:-8G} RAM, ${CAMERA_DEMO_SWAP_MAX:-2G} swap limit)."
     local exit_status
@@ -124,8 +127,11 @@ cleanup() {
 
 wait_for_detector() {
     for ((attempt=0; attempt<60; attempt++)); do
-        kill -0 "$DETECTOR_PID" 2>/dev/null || { tail -30 "$RUN_DIR/detector.log"; fail 'Detector exited during startup.'; }
-        if grep -q '^PACKAGE_DETECTOR_SERVICE_READY 10001$' "$RUN_DIR/detector.log"; then return 0; fi
+        kill -0 "$DETECTOR_PID" 2>/dev/null || {
+            [[ -f "$RUN_DIR/detector.log" ]] && tail -30 "$RUN_DIR/detector.log"
+            fail 'Detector exited during startup.'
+        }
+        if grep -q '^PACKAGE_DETECTOR_SERVICE_READY 10001$' "$RUN_DIR/detector.log" 2>/dev/null; then return 0; fi
         sleep 1
     done
     fail 'Detector readiness timed out; inspect detector.log.'
@@ -133,7 +139,10 @@ wait_for_detector() {
 
 wait_for_ros() {
     for ((attempt=0; attempt<90; attempt++)); do
-        kill -0 "$ROS_WRAPPER_PID" 2>/dev/null || { tail -30 "$RUN_DIR/ros-supervisor.log"; fail 'ROS supervisor exited during startup.'; }
+        kill -0 "$ROS_WRAPPER_PID" 2>/dev/null || {
+            [[ -f "$RUN_DIR/ros-supervisor.log" ]] && tail -30 "$RUN_DIR/ros-supervisor.log"
+            fail 'ROS supervisor exited during startup.'
+        }
         [[ ! -f "$RUN_DIR/ros-ready" ]] || return 0
         sleep 1
     done
@@ -145,14 +154,10 @@ open_unity() {
         echo "[INFO] Open $PROJECT_ROOT/Unity in Unity 6000.6.0f1, select MainWarehouse, connect to 127.0.0.1:10000, then press Play."
         return
     fi
-    # Search indexing is optional editor tooling, not a camera-demo dependency.
-    # Seed fresh preferences before Unity starts; preserve existing user choices.
     mkdir -p "$PROJECT_ROOT/Unity/UserSettings"
     if [[ ! -e "$PROJECT_ROOT/Unity/UserSettings/Search.settings" ]]; then
         printf 'indexOnEditorStartup = false\n' > "$PROJECT_ROOT/Unity/UserSettings/Search.settings"
     fi
-    # Process shutdown can leave Unity's recovery scenes behind. Keep them for
-    # recovery, but reopen the saved scene without an interactive backup dialog.
     if [[ -d "$PROJECT_ROOT/Unity/Temp/__Backupscenes" ]]; then
         mv "$PROJECT_ROOT/Unity/Temp/__Backupscenes" "$RUN_DIR/unity-scene-backups"
         echo "[RESTART] Preserved Unity recovery scenes: $RUN_DIR/unity-scene-backups"
@@ -163,7 +168,14 @@ open_unity() {
         -logFile "$RUN_DIR/unity.log" > "$RUN_DIR/unity-start.log" 2>&1 &
     UNITY_PID=$!
     for ((attempt=0; attempt<${UNITY_STARTUP_TIMEOUT:-600}; attempt++)); do
-        kill -0 "$UNITY_PID" 2>/dev/null || { tail -30 "$RUN_DIR/unity.log"; fail 'Unity exited before startup activity settled; inspect unity.log.'; }
+        if ! kill -0 "$UNITY_PID" 2>/dev/null; then
+            if [[ -f "$RUN_DIR/unity.log" ]]; then
+                tail -30 "$RUN_DIR/unity.log"
+            elif [[ -f "$RUN_DIR/unity-start.log" ]]; then
+                tail -30 "$RUN_DIR/unity-start.log"
+            fi
+            fail 'Unity exited before startup activity settled; inspect unity.log or unity-start.log.'
+        fi
         if [[ -f "$RUN_DIR/unity.log" ]] && grep -q 'CAMERA_DEMO_EDITOR_IDLE' "$RUN_DIR/unity.log"; then return 0; fi
         sleep 1
     done
@@ -171,15 +183,12 @@ open_unity() {
 }
 
 check_dependencies "$@"
-# Normal startup follows the working main launcher. Strict memory admission is
-# opt-in; the separate import diagnostic must not become a launch prerequisite.
 if [[ -n "${CAMERA_DEMO_MIN_AVAILABLE_GIB:-}" ]]; then
     python3 "$SCRIPT_DIR/../tools/camera_demo_resources.py" \
         --minimum-gib "$CAMERA_DEMO_MIN_AVAILABLE_GIB"
 fi
 isolate_demo_processes "$@"
 mkdir -p "$PROJECT_ROOT/ROS1/build"
-# Serialize replacement while allowing the next invocation to stop this run.
 exec 8> "$PROJECT_ROOT/ROS1/build/camera-demo-restart.lock"
 flock -n 8 || fail 'Another demo restart is in progress; wait until it is READY.'
 echo '[RESTART] Closing the previous demo before fresh startup.'
@@ -189,8 +198,6 @@ exec 9> "$PROJECT_ROOT/ROS1/build/camera-demo.lock"
 flock -n 9 || fail 'Another camera demo launcher is running.'
 RUN_DIR="$(mktemp -d "$PROJECT_ROOT/ROS1/build/camera-demo-$(date +%Y%m%d-%H%M%S)-XXXXXX")"
 printf '%s\n' "$CAMERA_DEMO_SCOPE" > "$RUN_DIR/systemd-scope.txt"
-# Preserve the code this run executes: Bash can otherwise reread an edited
-# helper mid-run, and logs should identify the exact helper version used.
 cp "$SCRIPT_DIR/prepare_camera_demo_ros.sh" "$SCRIPT_DIR/start_camera_demo_ros.sh" "$RUN_DIR/"
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -198,14 +205,12 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 echo "[1/4] Preparing ROS workspace. Logs: $RUN_DIR"
-# Background children must close fd 9 so leaving Unity open does not retain the launcher lock.
 "${ROS_RUNNER[@]}" "$RUN_DIR/prepare_camera_demo_ros.sh" "$PROJECT_ROOT" "$WORKSPACE" "$ENDPOINT_SOURCE" "$RUN_DIR" \
     > "$RUN_DIR/build.log" 2>&1 8>&- 9>&- &
 ROS_WRAPPER_PID=$!
-wait "$ROS_WRAPPER_PID" || { tail -40 "$RUN_DIR/build.log"; fail 'ROS preparation failed.'; }
+wait "$ROS_WRAPPER_PID" || { [[ -f "$RUN_DIR/build.log" ]] && tail -40 "$RUN_DIR/build.log"; fail 'ROS preparation failed.'; }
 ROS_WRAPPER_PID=''
 echo '[2/4] Opening MainWarehouse; waiting for editor background work. Wait for READY before pressing Play.'
-# Keep ROS and detector allocations out of Unity's first-import peak.
 open_unity 8>&- 9>&-
 echo '[3/4] Starting the YOLO detector on the host.'
 CAMERA_DEMO_RUN_DIR="$RUN_DIR" "$DETECTOR_PYTHON" "$PROJECT_ROOT/ROS1/tools/package_detector_service.py" \
@@ -220,7 +225,6 @@ echo '[4/4] Starting ROS camera delivery.'
 ROS_WRAPPER_PID=$!
 wait_for_ros
 
-# A subsequent invocation can now replace this run.
 flock -u 8
 exec 8>&-
 echo '[READY] Press Play in Unity. Keep this terminal open; Ctrl+C stops ROS and YOLO and leaves Unity open.'
