@@ -1,8 +1,0 @@
-<launch>
-    <!-- One-package camera pickup and delivery; pickup-only launch remains the default. -->
-    <arg name="start_from_drone_start" default="true" />
-    <include file="$(find drone_sorting)/launch/camera_pickup.launch">
-        <arg name="enable_delivery" value="true" />
-        <arg name="start_from_drone_start" value="$(arg start_from_drone_start)" />
-    </include>
-</launch>

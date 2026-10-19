@@ -67,12 +67,8 @@ DroneSortingProject/
 │   ├── tools/                     # Restart lifecycle, RGB inference, and physical evaluation
 │   └── src/drone_sorting/
 │       ├── launch/
-│       │   ├── camera_validation.launch
-│       │   ├── package_perception.launch
-│       │   ├── camera_pickup.launch
-│       │   ├── camera_delivery.launch
-│       │   ├── drone_demo.launch
-│       │   └── warehouse_demo.launch
+│       │   ├── demo.launch
+│       │   └── package_perception.launch
 │       ├── scripts/
 │       │   ├── camera_stream_check_node.py
 │       │   ├── package_perception_node.py
@@ -209,13 +205,11 @@ Unity only measures obstacle distances. ROS decides how the drone reacts.
 
 #### ROS Launch Files
 
-- `drone_demo.launch` starts ROS-TCP-Endpoint, Mission Manager, and Motion Controller.
-- `warehouse_demo.launch` reuses the generic launch file with `MainWarehouse` pickup/drop-off coordinates and warehouse-specific settings.
-- `package_perception.launch` starts the endpoint and read-only RGB-depth package perception.
-- `camera_pickup.launch` adds camera-guided pickup and lift with slower dynamic-speed control.
-- `camera_delivery.launch` adds flight from `DroneStart` to observation, then pickup, carry, release, and settling hold.
-- `camera_validation.launch` starts only the endpoint and read-only camera checker, without a mission or motion controller. See [sensor verification](docs/verification.md#repeat-the-live-sensor-only-check).
+- `demo.launch` starts camera-guided pickup and the motion controller, including `package_perception.launch` for the endpoint and RGB-depth perception. Its defaults run pickup-only from observation, matching the supplied configuration.
+- `run_camera_delivery_demo.sh` invokes `demo.launch enable_delivery:=true start_from_drone_start:=true` for full delivery from `DroneStart`.
+- `package_perception.launch` can also run read-only perception separately.
 
+The older fixed-coordinate, camera wrapper, and camera-validation launch files have been removed. Historical verification records refer to those earlier launch names.
 Warehouse obstacle avoidance is disabled by default until the warehouse sensor readings are validated.
 
 #### Helper Scripts
@@ -224,8 +218,8 @@ Warehouse obstacle avoidance is disabled by default until the warehouse sensor r
 |---|---|
 | `sync_ros_workspace.sh` | Copies the repository ROS package into the Catkin workspace |
 | `build_ros.sh` | Syncs and builds the ROS workspace |
-| `run_delivery_demo.sh` | Runs the smaller `SampleScene` integration demo |
-| `run_warehouse_ros_demo.sh` | Runs the fixed-coordinate `MainWarehouse` delivery on Linux or WSL2 |
+| `run_delivery_demo.sh` | Retired; exits with the camera runner command |
+| `run_warehouse_ros_demo.sh` | Retired; exits with the camera runner command |
 | `setup_camera_demo_linux.sh` | Installs pinned detector dependencies and prepares the camera ROS workspace |
 | `prepare_camera_demo_unity.sh` | Imports Unity alone with bounded memory and pressure monitoring |
 | `run_camera_delivery_demo.sh` | Restarts the camera demo, prepares the workspace, waits for Unity startup to settle, then starts YOLO/ROS for manual Play |
@@ -513,116 +507,15 @@ For later runs, use the same launch command.
 
 #### Fixed-coordinate warehouse setup
 
-This workflow does not use YOLO. Use native ROS Noetic on Ubuntu 20.04 or the
-[ROS Distrobox environment](docs/linux-camera-demo.md#ros-environment).
-
-Clone the repository and create the Catkin workspace:
-
-```bash
-git clone https://github.com/Dzzz83/DroneSortingProject.git
-cd DroneSortingProject
-
-mkdir -p ~/drone_sorting_ros1_ws/src
-```
-
-Install ROS-TCP-Endpoint:
-
-```bash
-cd ~/drone_sorting_ros1_ws/src
-git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
-```
-
-The helper scripts detect the repository location automatically, so the project does not need to be stored at `~/DroneSortingProject`.
-
-Return to the repository root and build the ROS workspace. In the sequence above,
-`cd -` returns from the Catkin workspace to the cloned repository:
-
-```bash
-cd -
-bash ROS1/scripts/build_ros.sh
-```
-
-Configure Unity:
-
-```text
-Robotics → ROS Settings
-
-Protocol: ROS1
-IP:       127.0.0.1
-Port:     10000
-
-Edit → Project Settings → Player
-Active Input Handling: Both
-```
-
-Run the fixed-coordinate warehouse mission without obstacle avoidance:
-
-```bash
-bash ROS1/scripts/run_warehouse_ros_demo.sh false
-```
-
-On the current CachyOS/Distrobox setup, the runner opens `MainWarehouse` in the host Unity Editor automatically. On native Linux, it opens Unity automatically when the configured `UNITY_EDITOR` path exists; otherwise it prints the project path to open manually.
-
-When Unity is ready, press **Play**.
-
-After validating warehouse sensor readings, enable obstacle avoidance with:
-
-```bash
-bash ROS1/scripts/run_warehouse_ros_demo.sh true
-```
+The fixed-coordinate launch files and runners are retired. Use the
+[Linux camera demo setup](#linux-camera-demo-setup) and
+`bash ROS1/scripts/run_camera_delivery_demo.sh`.
 
 ### Windows
 
-Run Unity on Windows and ROS 1 Noetic inside **WSL2 Ubuntu 20.04**.
-
-For the simplest setup, keep the repository on a Windows drive so both Windows Unity and WSL2 use the same checkout. For example:
-
-```text
-Windows:
-C:\Users\<you>\Documents\DroneSortingProject
-
-WSL2:
- /mnt/c/Users/<you>/Documents/DroneSortingProject
-```
-
-Inside WSL2, create the Catkin workspace and install ROS-TCP-Endpoint:
-
-```bash
-mkdir -p ~/drone_sorting_ros1_ws/src
-cd ~/drone_sorting_ros1_ws/src
-git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
-```
-
-Then enter the repository from WSL2 and run the same warehouse command used on Linux:
-
-```bash
-cd /mnt/c/Users/<you>/Documents/DroneSortingProject
-bash ROS1/scripts/run_warehouse_ros_demo.sh false
-```
-
-The runner detects WSL2 automatically. It builds and launches ROS inside WSL2, but does **not** try to launch the Linux Unity Editor. Instead, it prints the Windows Unity project path and connection instructions.
-
-In Windows Unity Hub:
-
-1. Open the repository's `Unity` folder.
-2. Open `Assets/Scenes/MainWarehouse.unity`.
-3. Set `Active Input Handling` to `Both`.
-4. Configure ROS Settings:
-
-```text
-Protocol: ROS1
-Port:     10000
-```
-
-Try `127.0.0.1` first. If it does not connect, use the WSL2 IP printed by the runner.
-
-Then press **Play**.
-
-Obstacle avoidance is enabled with the same command:
-
-```bash
-bash ROS1/scripts/run_warehouse_ros_demo.sh true
-```
+The previous fixed-coordinate WSL runner is retired. The supported camera runner
+currently targets native Linux with ROS Noetic or Distrobox; a Windows/WSL camera
+workflow has not been validated.
 
 ## Current Status
 
@@ -718,21 +611,20 @@ See [live trial evidence and reproduction](docs/verification.md#stationary-live-
 
 ### Camera-guided pickup: baseline verified
 
-`camera_pickup.launch` connects RGB-depth package perception, a one-package
+`demo.launch` with its default arguments connects RGB-depth package perception, a one-package
 guidance node, and the existing motion controller. It expects the robot to begin
 at the tested observation point (ROS `(34, 25, 6)`, Unity `(34, 6, 25)`) in a clear,
 controlled test area. It moves toward the grasp center derived from an upright
 0.6 m square box top, descends, requests one pickup, and lifts after Unity confirms
-`PICKUP_DONE`. It ends after lift; `camera_delivery.launch` adds access from `DroneStart` and continues to the final
-zone. The existing warehouse demo remains a separate fixed-coordinate workflow.
+`PICKUP_DONE`. It ends after lift. With `enable_delivery:=true start_from_drone_start:=true`,
+`demo.launch` adds access from `DroneStart` and continues to the destination.
 
 Trial speeds default to 0.5 m/s approach, 0.2 m/s descent, and 0.3 m/s lift,
 with 0.03 m arrival tolerance. The guidance node's private parameters configure
 these values; positive speeds must stay within the controller's 0.5 m/s cap.
 Zero `/drone/command_speed` means hold by sending no further position commands.
 The trial controller waits for a speed input and stops sending commands if position,
-target, or speed feedback is older than 0.5 seconds. The fixed-coordinate launch
-keeps dynamic speed disabled and defaults to 2 m/s.
+target, or speed feedback is older than 0.5 seconds. The retired fixed-coordinate launch used fixed speed at 2 m/s.
 
 One baseline run passed with ROS Noetic and batch Unity, using the same trained
 checkpoint and an additional RGB inference view (`--context-scale 1.5` on the
@@ -752,13 +644,13 @@ for recording, batch Unity startup, and evaluation commands.
 
 ### Camera-guided single-package delivery
 
-`camera_delivery.launch` now starts from `DroneStart` (Unity `(34, 2, 10)`,
+The camera runner enables full delivery in `demo.launch`, starting from `DroneStart` (Unity `(34, 2, 10)`,
 ROS `(34, 10, 2)`). It ascends vertically to root height 6 m, travels to the
 observation point (Unity `(34, 6, 25)`, ROS `(34, 25, 6)`), and holds within the
 arrival tolerance for one continuous second. It ignores package candidates during
 access and requires new images acquired after that hover before selecting a package.
 ROS remains the sole movement authority. It then reuses camera pickup and continues
-after lift: ascend vertically, carry above `SortingZoneA`, lower, request release, wait
+after lift: ascend vertically, carry above the configured destination, lower, request release, wait
 for `DROP_DONE`, then hold for settling. Baseline and changed-placement/rotation
 batch Unity deliveries from `DroneStart` passed independent physical evaluation.
 See [full-workflow evidence](docs/verification.md#full-workflow-from-dronestart).
@@ -781,18 +673,18 @@ To reproduce earlier observation-only deliveries, pair launch argument
 `DRONE_PICKUP_TRIAL_START=observation`. Pickup-only trials remain unchanged. Use a
 fresh output for every run and confirm previous control publishers have stopped. The
 [trial procedure and delivery evidence](docs/verification.md#camera-guided-single-package-delivery)
-cover batch startup, recording, and evaluation. `camera_pickup.launch` continues
-to end after lift; `warehouse_demo.launch` retains the fixed-coordinate demo.
+cover historical batch startup, recording, and evaluation. Use `demo.launch`
+with both delivery and start arguments enabled for current full-delivery trials;
+its defaults still end after pickup and lift.
 
-Scene-specific parameters are in `camera_pickup.launch`, shared by the delivery
-launch. ROS X/Y are horizontal; ROS Z is vertical, and heights refer to drone root:
+Scene-specific parameters are in `demo.launch`. ROS X/Y are horizontal; ROS Z is vertical, and heights refer to drone root:
 
 | Parameter | Default | Purpose |
 | --- | --- | --- |
 | `observation_x`, `observation_y`, `observation_height` | 34, 25, 6 m | Observation hover target |
 | `access_speed`, `access_timeout` | 0.5 m/s, 60 s | Speed and timeout for each access stage |
 | `hover_time` | 1 s | Continuous arrival tolerance before visual selection |
-| `dropoff_x`, `dropoff_y` | 28, 55 m | Destination center |
+| `dropoff_x`, `dropoff_y` | 38, 55 m | Destination center (Unity X/Z) |
 | `carry_height` | 6 m | Vertical ascent and horizontal transport height |
 | `release_height` | 1.4 m | Root height for release, accounting for the 0.95 m mount offset |
 | `carry_speed`, `lowering_speed` | 0.5, 0.2 m/s | Transport and destination descent |
@@ -805,8 +697,9 @@ Delivery uses the existing public mission sequence through `GO_TO_DROPOFF`,
 The physical checker requires continuous attachment during carry, ordered
 acknowledgements, final detachment, and the whole package footprint settling
 inside the zone. It also checks sampled collider penetration and hold drift.
-Avoidance remains disabled; the configured route was checked against active
-scene colliders, not established as a general navigation solution.
+Avoidance remains disabled. The earlier destination at ROS `(28, 55)` was checked against active
+scene colliders, not established as a general navigation solution. The current
+destination at ROS `(38, 55)` has not been validated by those earlier runs.
 
 ### Working
 

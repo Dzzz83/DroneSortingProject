@@ -33,4 +33,4 @@ RUN echo "source /catkin_ws/devel/setup.bash" >> ~/.bashrc
 EXPOSE 10000
 
 # Run ROS launch file on container start
-CMD ["/bin/bash", "-c", "source /catkin_ws/devel/setup.bash && roslaunch drone_sorting drone_demo.launch"]
+CMD ["/bin/bash", "-c", "source /catkin_ws/devel/setup.bash && roslaunch drone_sorting demo.launch enable_delivery:=true start_from_drone_start:=true"]

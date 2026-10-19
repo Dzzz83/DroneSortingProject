@@ -13,7 +13,7 @@
         <param name="access_speed" value="0.5" />
         <param name="access_timeout" value="60.0" />
         <param name="hover_time" value="1.0" />
-        <param name="dropoff_x" value="28.0" />
+        <param name="dropoff_x" value="38.0" />
         <param name="dropoff_y" value="55.0" />
         <param name="carry_height" value="6.0" />
         <param name="release_height" value="1.4" />
