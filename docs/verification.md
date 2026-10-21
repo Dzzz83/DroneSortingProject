@@ -785,8 +785,8 @@ python3 -m unittest discover -s ROS1/tools -p 'test_camera_demo_launcher.py' -v
 ```
 
 In a sourced Noetic environment, run the two ROS helper checks separately. The
-full host launcher suite requires the host systemd user manager and should not
-be run inside a container without it.
+launcher tests use fake editors and disable systemd isolation; they do not start
+the real Unity Editor. Host runs skip the two ROS helper checks.
 
 ```bash
 python3 -m unittest discover -s ROS1/tools -p 'test_camera_demo_launcher.py' -k existing_workspace_package -v
@@ -798,7 +798,8 @@ For spectator checks, keep `MainWarehouse` open with Play stopped and choose
 `ROS1/build/spectator-views/` show start, elevated start, pickup hover, mid-carry,
 destination hover and release. The verifier waits for renderer transform updates
 between poses and restores the original drone pose without saving. It also runs
-after script compilation. The previews do not include a physically carried package.
+after script compilation, except during camera-demo launcher startup. The previews
+do not include a physically carried package.
 
 To compare another editor-only angle without recompiling, write a request in that
 output directory, for example:
@@ -811,6 +812,320 @@ Save it as `request.json`; the editor consumes it and replaces the previews.
 This does not alter the runtime camera configuration. Inspect images even when
 the collider check passes: an earlier office-roof obstruction was visible in
 rendered previews but absent from the collider results.
+
+## Linux portability verification
+
+Current normal startup opens Unity directly with main's 8 GiB RAM / 2 GiB swap
+budget, without a default free-RAM threshold or import/cache gate. The stricter
+import experiments below are optional diagnostics and historical evidence, not
+normal setup requirements. See [normal startup restored](#normal-startup-restored)
+for the latest policy and checks.
+
+The `feat/linux-portable-setup` changes package the existing checkpoint and pin
+host Python dependencies, ROS-TCP-Endpoint, and the Unity ROS connector. Checks on
+the x86-64 CachyOS host with the existing Ubuntu 20.04 Noetic Distrobox found:
+
+- A disposable fresh checkout downloaded all nine Git LFS pointer assets from
+  GitHub. Git LFS also warned about 150 existing assets tracked as ordinary Git
+  binaries despite matching the LFS attributes; these files were present.
+- CPU setup installed a new Python 3.11 environment, passed `pip check`, loaded
+  the included single-class model and performed inference, and built a new
+  dedicated Catkin workspace. Repeating setup succeeded. No existing detector
+  environment or Catkin workspace was reused; the host Python 3.11 interpreter
+  and existing ROS container were prerequisites.
+- Setup refused to replace the existing camera workspace's Endpoint link.
+- Fresh launch reached CPU detector readiness and started ROS before opening
+  Unity. **Unity startup failed:** at 02:17 on 2026-10-15 the system memory-pressure
+  service killed Chromium's process group; at 02:18 the kernel killed Unity after
+  its demo scope reached 8 GiB RAM and 2 GiB swap. The pre-launch host had only
+  about 3.8 GiB available RAM. Scene readiness, compilation completion and physical
+  delivery were not verified for this checkout.
+- After that failure, the launcher gained a 10 GiB available-RAM preflight and
+  sequential asset imports with two job workers and one GC helper. Unit tests
+  exercise memory boundaries using files, not memory allocation, and check the
+  editor arguments using a fake editor. The real Unity import was **not rerun**;
+  these precautions have not been validated under a full import workload. The
+  blanket 10 GiB minimum was subsequently removed as described below.
+- The host Python tool suite ran 66 tests successfully, with two ROS-only checks
+  skipped. Inside Noetic, all 69 existing ROS tests and all 26 camera launcher,
+  Linux configuration, resource, and process tests passed without skips. Shell
+  syntax, affected Python parsing, Unity package JSON, the model checksum, and
+  diff whitespace checks passed.
+
+For lightweight regression checks (no real Unity launch):
+
+```bash
+bash -n ROS1/scripts/camera_demo_linux.sh ROS1/scripts/setup_camera_demo_linux.sh \
+  ROS1/scripts/run_camera_delivery_demo.sh
+python3 -m unittest discover -s ROS1/tools -p 'test_*.py'
+```
+
+### Separate import and cached startup
+
+Inspection of the original checkout found both asset databases and
+`Library/ScriptAssemblies/Assembly-CSharp.dll`. The user's fresh checkout had none
+of these files. This establishes different cache states, but does not measure
+the RAM required for either workload. No cache was deleted or copied between
+checkouts.
+
+At this intermediate stage, normal startup reported memory, warned below a
+provisional 4 GiB, and enforced a hard minimum only when `CAMERA_DEMO_MIN_AVAILABLE_GIB` is explicitly set. A
+missing/incomplete cache directs automatic startup to `prepare_camera_demo_unity.sh`
+before project processes were stopped. Manual backend-only startup still worked
+without a cache. This admission policy was later removed from normal startup.
+Cache files are indicators, not proof that no reimport is needed.
+
+The new import helper runs Unity alone with sequential imports, two job workers,
+one GC helper, and a ten-minute maximum. Its provisional experiment budget is
+4 GiB memory high, 5 GiB memory max, 512 MiB swap max, and 7 GiB initially available
+host RAM. Five consecutive checks with less than 2 GiB available RAM or at least
+10% full memory pressure (`avg10`) stop its scope. It records host memory/pressure
+and scope memory samples, and cleans up only its own scope on failure or timeout.
+These are experiment limits, not measured minimum hardware requirements. The
+latest host tool suite ran 76 tests with two ROS-only skips. Shell syntax and
+diff whitespace checks passed. The proposed systemd memory and runtime limit
+properties were accepted in a `/bin/true` probe; this did not start Unity. The
+helper refuses to run alongside an editor for the same checkout.
+
+Tests exercise cached startup at 8.7 GiB, fresh/partial caches, advisory versus
+explicit minimums, pressure boundaries, bounded command arguments, import failure,
+timeout, and scope cleanup. Editors and systemd are faked for import tests; they
+allocate no test memory. The first real import attempt is recorded below;
+subsequent delivery has not run with this policy.
+
+### Controlled import result
+
+On 2026-10-16, the approved Unity-only preparation command ran against
+`~/Documents/code/test/DroneSortingProject-fresh` with the limits above. It began
+with about 10.6 GiB available host RAM and no full-memory-stall pressure. The
+monitor stopped it after five consecutive pressure checks exceeded 10% full
+`avg10`; systemd recorded scope shutdown after about 93 seconds. No limits were
+increased and no second import was attempted.
+
+- Sampled peak scope memory: 4.02 GiB. The journal recorded a 512 MiB swap peak.
+- Lowest sampled host available RAM: 6.63 GiB.
+- Highest recorded full memory pressure `avg10`: 17.89%.
+- The project assembly was emitted; no `error CS` lines appeared in the captured
+  log. Scene readiness and complete import were not confirmed.
+- Scope shutdown was explicitly requested by the monitor. No project editor
+  processes remained afterward; no kernel OOM events appeared in the test window.
+  These observations do not guarantee that other applications felt no slowdown.
+
+Logs remain in the fresh checkout under
+`ROS1/build/unity-import-AsDIuR/` (`unity.log`, `scope.log`, `memory.log`, and the
+recorded scope name). The tested limits did not complete this first import, so
+normal demo startup and physical delivery were not attempted. This run measures
+a resource-constrained import; it does not establish the machine's minimum RAM
+requirement or prove that the 4 GiB soft limit is appropriate.
+
+The stopped import created all three cache files despite never confirming scene
+readiness. The cache guard therefore now requires a `COMPLETE` marker in the
+latest recorded import run, in addition to the cache files. The preparation
+helper writes it only after successful exit and scene confirmation. Previously
+working checkouts that predate this helper still use the file indicators. A
+regression test covers interrupted imports with apparently complete cache files.
+The final lightweight tool suite ran 77 tests, with two ROS-only skips.
+
+### Comparison without the soft limit
+
+The approved comparison changed only `MemoryHigh` from 4 GiB to unlimited;
+`MemoryMax=5G`, `MemorySwapMax=512M`, the initial headroom check, timeout, and
+pressure shutdown stayed in place. `--no-soft-limit` selects it explicitly; it is
+not the default or a verified fix. The 4 GiB soft limit may have contributed to
+reclaim stalls in the previous run, but that run did not capture its event
+counters, so the cause remains unconfirmed.
+
+The sampler now records cgroup RAM/swap usage, optional peak counters, limits,
+`memory.events`, and scope memory pressure in timestamped `scope-memory.jsonl`
+records. Host pressure is still captured separately. Five consecutive sampling
+failures stop the import. A three-second sleeping process verified real cgroup
+reads with `memory.high=max`, `memory.max=5368709120`, and
+`memory.swap.max=536870912`, zero swap use, and zero reclaim/OOM events. Unity
+was not started by that probe. All 81 lightweight tests ran successfully, with
+two ROS-only skips; tests cover parsing, missing required counters, optional
+peaks, preservation of hard caps, pressure shutdown without a soft limit, and
+cleanup after telemetry failure. Shell syntax and whitespace checks passed.
+
+To avoid comparing a full import with a partly cached continuation, the Unity
+`Assets`, `Packages`, and `ProjectSettings` folders from the user's fresh checkout
+were copied into ignored `ROS1/build/import-limit-comparison/Unity/`, without a
+`Library` directory. The source checkout's tracked scene, script, settings, and
+package files had no changes. The isolated copy preserves the stopped checkout
+and provides a new cache for the proposed comparison; it is not a fresh OS or a
+controlled cold disk/package-download cache.
+
+The approved command ran once on 2026-10-16, starting at 20:26 with about 9.8 GiB
+host available RAM and zero reported full memory pressure. After about 79 seconds,
+the kernel killed the main Unity process for cgroup OOM. Scope shutdown finished
+after about 89 seconds. Unity was importing a warehouse lightmap at the end of its
+log; scene readiness was not reported. No `COMPLETE` marker was written.
+
+| Measurement | 4 GiB soft limit | No soft limit |
+| --- | --- | --- |
+| Sampled peak scope RAM | 4.02 GiB | 5.00 GiB |
+| Peak scope swap | 512 MiB | 512 MiB |
+| Lowest sampled available host RAM | 6.63 GiB | 5.14 GiB |
+| Highest sampled host full pressure `avg10` | 17.89% | 3.22% |
+| Termination | Pressure monitor stopped scope | Kernel killed Unity at scope hard cap |
+
+The new counters recorded `memory.high=max`, zero `high` events, and 21,967 `max`
+events in the last sample. That sample still showed zero OOM kills; the kernel
+journal captured the kill immediately afterward. Sampling can miss a terminal
+event when the scope disappears. The kernel recorded memory usage equal to the
+5 GiB limit, swap usage essentially equal to the 512 MiB limit, and
+`CONSTRAINT_MEMCG` for the trial scope. This confirms that the hard cap constrained
+this run; it does not establish the minimum RAM needed for import or prove the
+cause of the earlier soft-limit stalls. The workload was new-cache in both
+trials, but host activity and package/disk caches were not controlled.
+
+No trial Unity processes remained after cleanup. The queried journal window
+contained no other OOM victims. Normal startup and physical delivery were not
+attempted. No retry or increase in limits occurred. The default limits remain
+provisional; removing the soft limit alone did not make this import succeed.
+
+Logs are retained under
+`ROS1/build/import-limit-comparison/ROS1/build/unity-import-rio5h7/`, including
+`scope-memory.jsonl`, `memory.log`, `unity.log`, `scope.log`, `scope-journal.log`,
+and `kernel-oom.log`. The disposable Unity source/cache copy was removed after
+process shutdown; both original checkouts were preserved. A further live test
+requires a separate decision on the import workload or resource budget.
+
+### 7 GiB comparison
+
+The user authorized one 7 GiB RAM trial without a soft limit, retaining the
+512 MiB swap cap, pressure shutdown, and timeout. `UNITY_IMPORT_RAM_GIB=7` selects
+this budget; preflight derives a 9 GiB available-host-RAM minimum by reserving
+2 GiB beyond the cap. The default remains 5 GiB. Unsupported budgets are rejected
+before launch. Tests check the derived headroom and unchanged swap/time limits.
+A new isolated copy without `Library` was prepared under ignored
+`ROS1/build/import-limit-comparison-7g/`. Initial preflight found only 8.7 GiB
+available and refused startup; no application was closed by the script. The
+lightweight suite ran 83 tests with two ROS-only skips; shell syntax and
+whitespace checks passed.
+
+Preflight subsequently passed with 9.6 GiB available RAM. One approved import ran
+on 2026-10-16 from 20:38:47 until the kernel killed Unity at 20:43:32; scope shutdown
+finished at 20:43:42. The hard cap was 7 GiB, swap remained 512 MiB, and
+`memory.high=max`. No automatic retry or limit increase occurred.
+
+- Sampled peak scope RAM: 7.00 GiB; peak swap: 512 MiB.
+- Lowest sampled host available RAM: 3.28 GiB; highest full host pressure `avg10`:
+  4.78%, below the monitor's 10% threshold.
+- The final scope sample recorded 28,785 `max` events, zero `high` events,
+  one OOM event and one OOM kill. The kernel confirmed `CONSTRAINT_MEMCG` and
+  killed the main Unity process. The final log was in texture compression.
+- Scene readiness and complete import were not confirmed; no `COMPLETE` marker
+  was written. The script exited unsuccessfully and all scope processes exited.
+- The queried journal window contained no other OOM victims. This does not prove
+  there was no slowdown for other applications.
+
+Logs and the scoped kernel/user journal excerpts remain under
+`ROS1/build/import-limit-comparison-7g/ROS1/build/unity-import-swRXHC/`. The failed
+trial's disposable Unity source/cache copy was removed; original checkouts were
+preserved. Normal demo startup and delivery were not attempted.
+
+### Comparison with current main
+
+During the trial, the user asked to compare the scripts that had worked on main.
+The local `main` ref was stale at `4625497`; GitHub main was fetched without
+switching or merging branches and resolved to `815d9ab1572d2cc20881191c285bb1c0063922d0`
+(merge of `camera_drone`). This current main **does include** the camera launcher;
+the earlier local-ref comparison that found no camera launcher was outdated.
+
+The camera launcher on current main applies `MemoryMax=8G` and `MemorySwapMax=2G`,
+starts the host GPU detector by default, and opens Unity directly. It has no
+minimum-free-RAM requirement and no prerequisite import-completion/cache gate.
+The warehouse launcher on main does not impose a memory scope at all. The Unity
+asset and script trees and project settings match the portability branch; only
+the connector revision in manifest/lock files is pinned here.
+
+The 5/7 GiB import budgets, 512 MiB swap cap, initial headroom requirements,
+separate preparation command and mandatory cache gate were added during this
+portability work. They are stricter experimental constraints, not measured demo
+hardware requirements. The 7 GiB cgroup failure confirms this experiment's cap
+was hit; it does not contradict the user's successful normal runs on main's
+larger budget or establish a new host-RAM requirement. Normal startup was
+subsequently restored toward main's flow, as recorded below.
+
+### Normal startup restored
+
+The normal camera launcher now opens Unity directly, including fresh checkouts
+and projects with interrupted diagnostic imports. It no longer invokes the
+cache-completion diagnostic or imposes a default available-RAM threshold.
+`CAMERA_DEMO_MIN_AVAILABLE_GIB` still enforces a minimum only when explicitly set.
+The normal systemd scope keeps main's `MemoryMax=8G` / `MemorySwapMax=2G`, without
+a soft limit. Unity uses main's four job workers without forced import mode or
+GC helper settings. The configurable scene readiness timeout remains 600 seconds
+to allow more time for fresh imports than main's fixed 180 seconds.
+
+The included model, pinned dependencies, setup command, portable path discovery,
+CPU/GPU options, native/Distrobox selection, and manual Unity mode remain. Setup
+now prints the normal launcher command; the README's fresh-clone sequence no
+longer includes the optional import diagnostic.
+
+Lightweight tests exercise fresh and interrupted-import startup through a fake
+restart boundary, verify the default 8 GiB / 2 GiB scope settings, capture the
+restored arguments with a fake editor, and check that an explicit minimum still
+refuses startup before project cleanup. The full host tool suite ran 84 tests,
+with two ROS-only skips. Shell syntax and diff whitespace checks passed.
+No real Unity, ROS mission, or detector was launched for this change; a fresh
+end-to-end run under the restored policy remains unverified. Earlier failed
+strict-budget experiments do not validate or invalidate that restored workflow.
+
+Native Noetic on another Linux distribution, a newly created ROS container,
+optional CUDA installation, and physical delivery using the new CPU default
+remain unverified. A future live check should be scheduled only with sufficient
+memory headroom; the scope limit alone did not protect other applications.
+
+### Fresh-clone startup after the memory failure
+
+On 2026-10-16 at 21:13:58 local time, the user's normal fresh-clone run exhausted
+its 8 GiB RAM / 2 GiB swap scope. The kernel recorded `CONSTRAINT_MEMCG` and killed
+the Unity editor. Three import workers and multiple shader compilers were active.
+The scene-open message preceded background Search indexing, so the launcher had
+reported READY before startup work finished. This establishes a demo-scope limit
+failure, rather than proving that all host memory was exhausted.
+
+The revised launcher requests one desired and one standby import worker, with a
+one-second idle shutdown delay for surplus workers. Unity 6000.6 rejected zero
+standby workers in an initial trial; the final configuration uses one. Fresh
+Search preferences disable automatic startup indexing; existing preferences are
+preserved. Automatic spectator diagnostic previews are skipped for this launcher,
+while the explicit verification command remains available. The launcher opens a
+Game view and waits for ten idle seconds across imports, script/shader compilation,
+and Progress tasks before allocating YOLO or starting ROS. The wait log identifies
+remaining tasks, including HDRP compute-variant compilation.
+
+The final disposable snapshot used tracked project inputs including these changes,
+no Unity Library/UserSettings cache, and hash-verified materialized LFS assets.
+It reused the installed detector environment, Endpoint source, and existing
+Distrobox; this was a fresh Unity-cache startup test, not a fresh-machine install.
+The 8 GiB RAM / 2 GiB swap limits were unchanged. A separate monitor sampled
+cgroup counters and host memory each second, stopping the owned test processes
+after five consecutive readings below 2 GiB available host RAM or at least 10%
+full memory pressure (`avg10`).
+
+The fresh-cache run reached READY after about 8.5 minutes, including substantial
+HDRP compute-variant compilation after scene opening. Play Mode then produced
+repeated `DETECTIONS`/`NO_DETECTIONS` results and advanced to `GO_TO_OBSERVATION`.
+The scope reached both caps, but recorded zero OOM events or kills; the lowest
+sampled host available RAM was 2.04 GiB, and no pressure guard checks failed.
+This remains a tight memory budget, not evidence of spare capacity or a minimum
+hardware requirement. A preceding cached trial without a Game view received one
+camera result and then failed with `position_feedback_unavailable`; it did not
+validate sustained camera updates. No physical pickup/drop success is claimed.
+
+A cached restart of the final configuration also reached READY and produced
+repeated camera results through `GO_TO_OBSERVATION`. Its recorded peaks were
+7.88 GiB scope RAM and 1.30 GiB swap, with zero OOM kills and at least 2.27 GiB
+available host RAM. Both final runs were stopped after the startup/camera smoke
+check rather than running the full pickup/drop mission.
+
+The full lightweight host-tool suite passed 84 tests with two ROS-only skips.
+Shell syntax and whitespace checks passed. The final C# code compiled and ran in
+Unity 6000.6.0f1. Final trial logs and memory samples are retained under ignored
+`ROS1/build/startup-memory-fix-final-results/`; disposable source/cache copies are
+removed after all their processes stop.
 
 ## What remains unverified
 

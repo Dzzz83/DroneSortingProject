@@ -113,10 +113,10 @@ WAIT_FOR_DROP → COMPLETE`. Advance package stages only after Unity returns
 `PICKUP_DONE` or `DROP_DONE`. The Unity camera publisher only supplies observations; ROS guidance selects
 targets and preserves this public mission sequence.
 
-`warehouse_demo.launch` uses ROS pickup `(34.23, 25.10, 1.39)`, drop-off
+The retired `warehouse_demo.launch` used ROS pickup `(34.23, 25.10, 1.39)`, drop-off
 `(28, 55, 1.95)`, and arrival tolerance 0.05 m. The drone prefab's package mount
 is 0.95 m below its root and its pickup radius is 0.22 m. These explain the
-existing launch targets; they are not permission to feed exact package positions
+historical launch targets; they are not permission to feed exact package positions
 into future perception.
 
 Current movement is kinematic position-command simulation, not a realistic
@@ -124,11 +124,13 @@ flight controller, localization system, or dynamics model. Warehouse avoidance
 is off by default pending validation; the README records earlier static
 avoidance validation in `SampleScene`. LiDAR is not part of the new camera work.
 
-`camera_pickup.launch` estimates the pickup target from RGB-depth observations
-and ends after acknowledgement-gated lift. `camera_delivery.launch` reuses it and
-adds ascent from `DroneStart`, travel to observation, and hover before visual pickup,
-then continues through carry, lowering, release, and settling hold. Pickup-only
-starts at the observation waypoint. Both enable dynamic speed and disable avoidance.
+`demo.launch` estimates the pickup target from RGB-depth observations
+and defaults to ending after acknowledgement-gated lift at the observation waypoint.
+The camera runner passes `enable_delivery:=true start_from_drone_start:=true`
+to add ascent from `DroneStart`, travel to observation, and hover before visual pickup,
+then carry, lowering, release, and settling hold. Both modes enable dynamic speed
+and disable avoidance. The launch includes `package_perception.launch`, which
+includes the external ROS-TCP-Endpoint launch file.
 `DROP_DONE` confirms release; the offline physical checker separately verifies
 final placement. Destination coordinates, heights, speeds, and timeouts are owned
 by the [README](../README.md#camera-guided-single-package-delivery) and launch file.

@@ -22,6 +22,7 @@ class Process:
     arguments: tuple
     environment: frozenset
     scopes: frozenset
+    parent_pid: int = 0
 
 
 def read_process(pid, proc_root=Path('/proc')):
@@ -38,7 +39,7 @@ def read_process(pid, proc_root=Path('/proc')):
         environment = frozenset((directory / 'environ').read_bytes().decode().split('\0'))
         scopes = frozenset(part for line in (directory / 'cgroup').read_text().splitlines()
                            for part in line.split('/') if SCOPE_NAME.fullmatch(part))
-        return Process(int(pid), fields[19], arguments, environment, scopes)
+        return Process(int(pid), fields[19], arguments, environment, scopes, int(fields[1]))
     except (OSError, UnicodeError, IndexError):
         return None
 
@@ -100,6 +101,8 @@ def stop_processes(selected, grace=20):
 def stop_scope(scope):
     # systemd scopes include Unity import workers and the host detector. Ignore
     # absent units left over in old log directories, but report actual failures.
+    if not Path('/run/systemd/system').exists():
+        return
     result = subprocess.run(['systemctl', '--user', 'show', scope, '--property=ActiveState', '--value'],
                             capture_output=True, text=True, check=False)
     if result.stdout.strip() not in ('active', 'activating', 'deactivating'):
@@ -117,7 +120,7 @@ def stop_scope(scope):
     # The following port/editor preflight also verifies shutdown before startup.
 
 
-def restart(project, current_scope):
+def restart(project, current_scope, unity_mode='auto'):
     project = project.resolve()
     run_directories = [path.resolve() for path in (project / 'ROS1/build').glob('camera-demo-*')
                        if path.is_dir() and not path.is_symlink()]
@@ -129,7 +132,9 @@ def restart(project, current_scope):
             if SCOPE_NAME.fullmatch(scope):
                 scopes.add(scope)
     snapshot = processes()
-    editors = [process for process in snapshot if is_project_editor(process, project)]
+    editors = []
+    if unity_mode == 'auto':
+        editors = [process for process in snapshot if is_project_editor(process, project)]
     # Recover an older project editor even if it predates scope log recording.
     for editor in editors:
         scopes.update(editor.scopes)
@@ -139,8 +144,17 @@ def restart(project, current_scope):
     if ros:
         print('[RESTART] Stopping previous demo ROS/build processes (including Distrobox).', flush=True)
         stop_processes(ros)
-    for scope in sorted(scopes):
-        stop_scope(scope)
+    if unity_mode == 'auto':
+        for scope in sorted(scopes):
+            stop_scope(scope)
+    # Without a scope, import workers still belong to their exact project editor.
+    editor_pids = {editor.pid for editor in editors}
+    while True:
+        descendants = {process.pid for process in snapshot if process.parent_pid in editor_pids}
+        if descendants <= editor_pids:
+            break
+        editor_pids.update(descendants)
+    editors = [process for process in snapshot if process.pid in editor_pids]
     remaining_editors = [process for process in editors if still_running(process)
                          and current_scope not in process.scopes]
     if remaining_editors:
@@ -152,9 +166,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('project', type=Path)
     parser.add_argument('current_scope')
+    parser.add_argument('--unity-mode', choices=('auto', 'manual'), default='auto')
     args = parser.parse_args()
     try:
-        restart(args.project, args.current_scope)
+        restart(args.project, args.current_scope, args.unity_mode)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f'[FAIL] Restart failed: {error}\n')
 
