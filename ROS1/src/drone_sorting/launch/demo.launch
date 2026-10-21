@@ -13,7 +13,7 @@
         <param name="access_speed" value="0.5" />
         <param name="access_timeout" value="60.0" />
         <param name="hover_time" value="1.0" />
-        <param name="dropoff_x" value="38.0" />
+        <param name="dropoff_x" value="12.0" />
         <param name="dropoff_y" value="55.0" />
         <param name="carry_height" value="6.0" />
         <param name="release_height" value="1.4" />
@@ -24,8 +24,8 @@
         <param name="settle_time" value="2.0" />
     </node>
     <node pkg="drone_sorting" type="motion_controller_node.py" name="motion_controller" output="screen">
-        <param name="enable_obstacle_avoidance" value="false" />
-        <param name="speed" value="0.5" />
+        <param name="enable_obstacle_avoidance" value="true" />
+        <param name="speed" value="1" />
         <param name="enable_dynamic_speed" value="true" />
         <param name="position_timeout" value="0.5" />
         <param name="target_timeout" value="0.5" />

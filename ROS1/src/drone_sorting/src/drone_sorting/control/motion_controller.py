@@ -12,7 +12,7 @@ from drone_sorting.planning.obstacle_avoidance import (
 
 class MotionController:
     def __init__(self):
-        self.speed = float(rospy.get_param("~speed", 2.0))
+        self.speed = float(rospy.get_param("~speed", 20.0))
         if not math.isfinite(self.speed) or self.speed <= 0:
             raise ValueError("Motion speed must be finite and positive")
         self.maximum_speed = self.speed

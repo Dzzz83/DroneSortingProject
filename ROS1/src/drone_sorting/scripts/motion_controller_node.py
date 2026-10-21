@@ -2,7 +2,7 @@
 
 import rospy
 
-from drone_sorting.control.motion_controller import MotionController
+from drone_sorting.control.motion_controller2 import MotionController
 
 
 def main():

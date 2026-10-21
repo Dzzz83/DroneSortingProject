@@ -75607,7 +75607,7 @@ Transform:
   m_GameObject: {fileID: 784861047}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 28, y: 2, z: 55}
+  m_LocalPosition: {x: 12.1, y: 2, z: 55}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -80546,7 +80546,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8c6da6f2c2913ff5caef5c5c19391037, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneRgbCamera
   imageWidth: 800
   imageHeight: 600
@@ -80563,7 +80563,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData
   m_Version: 9
   m_ObsoleteRenderingPath: 0
@@ -89875,7 +89875,7 @@ Transform:
   m_GameObject: {fileID: 931414668}
   serializedVersion: 2
   m_LocalRotation: {x: 0.010087831, y: -0.9747033, z: 0.1330179, w: 0.17932631}
-  m_LocalPosition: {x: -1.265522, y: 2.5746195, z: 46.071484}
+  m_LocalPosition: {x: -1.2655182, y: 2.5746207, z: 46.071484}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -119318,6 +119318,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1233352688709371825, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
+      propertyPath: m_Enabled
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 2346774973623455758, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
       propertyPath: m_LocalPosition.x
       value: 31
@@ -119364,7 +119368,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5632878214517584031, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 2.57462
+      value: 2.5746207
       objectReference: {fileID: 0}
     - target: {fileID: 5632878214517584031, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
       propertyPath: m_LocalPosition.z
@@ -200313,7 +200317,7 @@ Transform:
   m_GameObject: {fileID: 2008755142}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 28, y: 0.1, z: 55}
+  m_LocalPosition: {x: 12.1, y: 0.1, z: 55}
   m_LocalScale: {x: 5, y: 0.04, z: 5}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -207662,7 +207666,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6245567926813642484, guid: 769ed6c4060d79629b7936923897b188, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 35.3
+      value: 35.54
       objectReference: {fileID: 0}
     - target: {fileID: 6245567926813642484, guid: 769ed6c4060d79629b7936923897b188, type: 3}
       propertyPath: m_LocalPosition.y
@@ -207670,7 +207674,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6245567926813642484, guid: 769ed6c4060d79629b7936923897b188, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 26.3
+      value: 26.92
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
