@@ -470,7 +470,7 @@ git lfs pull
 **2. Set up once**
 
 ```bash
-bash ROS1/scripts/setup_camera_demo_linux.sh
+$ sudo bash ROS1/scripts/setup_camera_demo_linux.sh
 ```
 
 Wait for `[OK] Setup complete`. Setup creates the Python venv and prepares the
@@ -483,7 +483,13 @@ Save Unity edits first: launching closes this project's previous editor.
 From the repository root:
 
 ```bash
-bash ROS1/scripts/run_camera_delivery_demo.sh
+$ bash ROS1/scripts/run_camera_delivery_demo.sh
+```
+
+If your Unity is not in the same container as your ROS but in the native OS environment, use this command instead:
+
+```bash
+$ UNITY_MODE=manual bash ROS1/scripts/run_camera_delivery_demo.sh
 ```
 
 Wait for **`[READY]`**, then press **Play** in Unity. Leave the terminal open.
