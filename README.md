@@ -16,7 +16,11 @@ from the **repository root**: the folder containing `README.md`, `ROS1/` and `Un
 
 ### First-time setup
 
-Install the [requirements](#installation) first. For a new checkout:
+Install the [requirements](#installation) first. The
+[Setup and troubleshooting guide](docs/setup-and-troubleshooting.md) covers ROS/Distrobox
+installation, custom Unity/Python paths, optional GPU inference and startup problems.
+
+For a new checkout:
 
 ```bash
 git lfs install
@@ -67,7 +71,7 @@ start a fresh attempt.
 | Tools | Git + Git LFS, Bash, `flock`, `realpath`, `sha256sum`; OpenCV GL/GLib libraries |
 
 Unity and the detector run on the host. Noetic is end-of-life; Windows/WSL is not
-supported by these launch scripts. See [environment setup](docs/linux-camera-demo.md)
+supported by these launch scripts. See [Setup and troubleshooting](docs/setup-and-troubleshooting.md)
 for ROS/container installation and executable overrides.
 
 ## Workflow
@@ -190,7 +194,7 @@ press Play. Verify obstacle avoidance, pickup and final placement at the new spe
 | `Unity/Assets/{Settings,Materials,DroneDelivery,TextMesh Pro,Shaders,Resources}/` | Rendering settings/materials, text shaders, depth shader and ROS connection prefab |
 | `Unity/Packages/`, `ProjectSettings/` | Dependency versions and Unity project settings |
 | `ROS1/build/`, `Unity/Library/` | Ignored generated dependencies/workspace/logs and Unity import cache |
-| `docs/linux-camera-demo.md` | Advanced environment setup and troubleshooting |
+| `docs/setup-and-troubleshooting.md` | Linux environment setup, executable overrides and troubleshooting |
 
 The Catkin package is separate from `build/` to prevent ROS resource searches
 following generated workspace symlinks back into the package.
@@ -281,7 +285,7 @@ if commands would lead Unity's reported position by more than `maximum_command_l
 | --- | --- |
 | Missing camera data before Play | Expected; press Play. If it persists, check Game view and Unity Console |
 | Mission fails or holds | Read terminal guidance reason, `monitor.log`, ROS logs and Unity Console; stop Play and restart |
-| Unity/Python missing, occupied ports, slow startup | [Advanced setup and troubleshooting](docs/linux-camera-demo.md) |
+| Unity/Python missing, occupied ports, slow startup | [Setup and troubleshooting](docs/setup-and-troubleshooting.md) |
 
 Each run prints `ROS1/build/camera-demo-*/`. Logs separate Unity (`unity.log`),
 inference (`detector.log`), mission (`monitor.log`), build (`build.log`) and ROS

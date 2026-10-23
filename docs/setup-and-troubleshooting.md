@@ -1,7 +1,13 @@
-# Linux camera demo: advanced setup and troubleshooting
+# Setup and troubleshooting
 
-For the normal setup and launch sequence, use the
-[README quick start](../README.md#run-the-demo).
+Use this guide to prepare another Linux machine, configure custom executable paths,
+or diagnose startup problems. Check the [requirements](../README.md#installation)
+first. For everyday commands, use [Run the demo](../README.md#run-the-demo);
+for drone speed, destination and other mission tuning, use
+[Demo settings](../README.md#demo-settings).
+
+Run project commands from the repository root in your host terminal unless a step
+explicitly says to run inside the ROS container.
 
 ## Additional prerequisites
 
@@ -88,9 +94,10 @@ bash ROS1/scripts/setup_demo.sh --gpu
 DETECTOR_DEVICE=0 bash ROS1/scripts/run_demo.sh
 ```
 
-Set `DETECTOR_DEVICE=0` on subsequent GPU runs too. The latest startup checks used
-CPU inference; they did not validate this optional CUDA installation. Observations
-older than 1.5 seconds are rejected, so inference speed affects delivery.
+Set `DETECTOR_DEVICE=0` on subsequent GPU runs too. The optional CUDA installation
+has not been validated by the current live checks. Perception rejects observations
+older than `package_perception.maximum_age` in
+[demo.yaml](../ROS1/package/config/demo.yaml), so inference speed affects delivery.
 
 PyTorch is pinned to 2.5.1 and torchvision to 0.20.1. Other Python dependencies
 are in [detector.txt](../ROS1/requirements/detector.txt). See the
@@ -98,15 +105,11 @@ are in [detector.txt](../ROS1/requirements/detector.txt). See the
 
 ## Memory and startup
 
-On the tested 16 GiB laptop, a fresh Unity-cache startup took about 8.5 minutes
-and a cached restart took about 40 seconds. Both produced repeated camera results
-and reached the observation flight phase. These startup checks stopped before
-physical pickup/drop; they do not establish minimum hardware requirements.
+Keep `Unity/Library/` to reuse imported assets; a fresh import takes longer than
+a cached restart. Close unused applications if startup runs short of memory.
 
 With systemd available, host demo processes share an 8 GiB RAM / 2 GiB swap cap.
-The fresh run reached both limits without an OOM, so headroom remains tight.
 ROS inside Distrobox uses its container's resource group, outside the host cap.
-The cap does not reserve memory or guarantee other applications avoid pressure.
 
 | Setting | Purpose |
 | --- | --- |
@@ -127,8 +130,9 @@ then close Unity before rerunning. Existing preferences are otherwise preserved.
 
 Each run prints its directory under `ROS1/build/camera-demo-<timestamp>-<id>/`.
 The next launch removes completed run output. Logs still used by an open Unity
-editor in manual mode are retained. Unity recovery scenes are moved to the ignored
-`Unity/UserSettings/SceneBackups/` directory before their old run is deleted.
+editor in manual mode are retained. Startup preserves Unity recovery scenes in the
+current run's `unity-scene-backups/` directory; before that run is later deleted,
+they are moved to `Unity/UserSettings/SceneBackups/`.
 
 | Log | Use it for |
 | --- | --- |
@@ -144,12 +148,6 @@ open **Window → General → Game**, confirm Play is active, and check Unity's 
 
 If a port is unavailable, identify its owner before stopping it. The demo needs
 ports `11311`, `10000`, and `10001`; it refuses to terminate unrelated services.
-A `git pull --ff-only` failure means branch history needs resolving before setup;
-do not reset away local work to follow the guide.
-
-Normal Ctrl+C stops ROS and YOLO while leaving Unity open. Relaunching replaces
-this project's previous demo processes. Save editor changes first. Recovery scenes
-left by shutdown are preserved in the new run's `unity-scene-backups/` directory.
 
 ## Other paths
 
