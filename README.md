@@ -4,6 +4,58 @@ One warehouse demo: a drone finds a package with an RGB-depth camera, picks it u
 and delivers it to a sorting zone. **ROS owns the mission and movement; Unity owns
 simulation, sensors, package physics, and rendering.**
 
+## Run the demo
+
+Use a **host terminal**, outside the ROS container, without `sudo`. Run the commands
+from the **repository root**: the folder containing `README.md`, `ROS1/` and `Unity/`.
+
+| When | Script to run |
+| --- | --- |
+| First setup or dependencies changed | `bash ROS1/scripts/setup_demo.sh` |
+| Every run or restart | `bash ROS1/scripts/run_demo.sh` |
+
+### First-time setup
+
+Install the [requirements](#installation) first. For a new checkout:
+
+```bash
+git lfs install
+git clone https://github.com/Dzzz83/DroneSortingProject.git
+cd DroneSortingProject
+git lfs pull
+bash ROS1/scripts/setup_demo.sh
+```
+
+For an existing checkout, enter its root and run `git lfs pull`, then
+`bash ROS1/scripts/setup_demo.sh`.
+
+Setup creates the detector environment, verifies the included model, and builds
+the ROS workspace. It does not install Unity or system packages.
+Wait for `[OK] Setup complete`.
+Rerun setup after dependencies change, with the demo stopped. No training is needed.
+
+### Run or restart
+
+Open a host terminal and enter your checkout (replace `/path/to/DroneSortingProject`
+with its actual location). Save Unity edits first: the runner closes this project's
+previous demo editor.
+
+```bash
+cd /path/to/DroneSortingProject
+bash ROS1/scripts/run_demo.sh
+```
+
+The runner builds the ROS workspace, opens `MainWarehouse`, and starts ROS and
+YOLO. You do not need to run individual nodes or scripts in `scripts/internal/`.
+Wait for **`[READY]`**, then press **Play** in Unity. Keep the launcher terminal open
+and the **Game** view available. The saved scene is `Unity/Assets/Scenes/MainWarehouse.unity`.
+
+### Stop and retry
+
+Stop Play in Unity, then press **Ctrl+C** in the launcher terminal to stop ROS and
+YOLO. Unity stays open. Save any edits, then use the same run command above to
+start a fresh attempt.
+
 ## Installation
 
 | Requirement | Supported setup |
@@ -18,29 +70,7 @@ Unity and the detector run on the host. Noetic is end-of-life; Windows/WSL is no
 supported by these launch scripts. See [environment setup](docs/linux-camera-demo.md)
 for ROS/container installation and executable overrides.
 
-```bash
-git lfs install
-git clone https://github.com/Dzzz83/DroneSortingProject.git
-cd DroneSortingProject
-git lfs pull
-bash ROS1/scripts/setup_demo.sh
-```
-
-Use your **host terminal**, from the repository root, without `sudo`. Setup creates
-the detector environment, verifies the included model, and builds the ROS workspace.
-It does not install Unity or system packages. Wait for `[OK] Setup complete`.
-Rerun setup after dependencies change, with the demo stopped. No training is needed.
-
 ## Workflow
-
-Save Unity edits first: running the launcher closes this project's previous demo editor.
-
-```bash
-bash ROS1/scripts/run_demo.sh
-```
-
-Wait for **`[READY]`**, then press **Play** in Unity. Keep the launcher terminal open
-and the **Game** view available. The saved scene is `Unity/Assets/Scenes/MainWarehouse.unity`.
 
 ```mermaid
 flowchart LR
@@ -53,9 +83,8 @@ flowchart LR
 
 Check that the package is physically carried and rests inside the destination.
 `COMPLETE` alone does not prove correct placement or collision-free travel.
-**Ctrl+C** stops ROS/YOLO and leaves Unity open. Stop Play before editing; use the
-same command to restart. A mission performs one delivery; repeated cycles and
-automatic failure recovery are not implemented.
+A mission performs one delivery; repeated cycles and automatic failure recovery
+are not implemented.
 
 | Spectator camera control | Action (click the Game view first) |
 | --- | --- |

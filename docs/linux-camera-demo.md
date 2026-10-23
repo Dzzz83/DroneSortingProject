@@ -1,7 +1,7 @@
 # Linux camera demo: advanced setup and troubleshooting
 
 For the normal setup and launch sequence, use the
-[README quick start](../README.md#installation).
+[README quick start](../README.md#run-the-demo).
 
 ## Additional prerequisites
 
