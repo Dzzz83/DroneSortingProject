@@ -1,7 +1,7 @@
 # Linux camera demo: advanced setup and troubleshooting
 
 For the normal setup and launch sequence, use the
-[README quick start](../README.md#linux-camera-demo-setup).
+[README quick start](../README.md#installation).
 
 ## Additional prerequisites
 
@@ -53,7 +53,7 @@ locked snapshots. See [ROS Noetic status](https://discourse.ros.org/t/ros-noetic
 Setup normally finds `python3.11`. If yours has a different name or location:
 
 ```bash
-DETECTOR_SETUP_PYTHON=/absolute/path/to/python3.11 bash ROS1/scripts/setup_camera_demo_linux.sh
+DETECTOR_SETUP_PYTHON=/absolute/path/to/python3.11 bash ROS1/scripts/setup_demo.sh
 ```
 
 Setup creates and uses `ROS1/build/detector-venv` automatically. Manual activation
@@ -66,13 +66,13 @@ or use an Endpoint checkout with local changes or a different revision.
 Standard Unity Hub paths for version 6000.6.0f1 are detected. For another location:
 
 ```bash
-UNITY_EDITOR=/absolute/path/to/Editor/Unity bash ROS1/scripts/run_camera_delivery_demo.sh
+UNITY_EDITOR=/absolute/path/to/Editor/Unity bash ROS1/scripts/run_demo.sh
 ```
 
 To manage the editor yourself instead of letting the launcher reopen it:
 
 ```bash
-UNITY_MODE=manual bash ROS1/scripts/run_camera_delivery_demo.sh
+UNITY_MODE=manual bash ROS1/scripts/run_demo.sh
 ```
 
 Open the repository's `Unity` directory, select `MainWarehouse`, and configure
@@ -84,8 +84,8 @@ the terminal, then press Play. Manual mode does not check editor readiness.
 CPU inference is the default. With an NVIDIA driver compatible with CUDA 12.4:
 
 ```bash
-bash ROS1/scripts/setup_camera_demo_linux.sh --gpu
-DETECTOR_DEVICE=0 bash ROS1/scripts/run_camera_delivery_demo.sh
+bash ROS1/scripts/setup_demo.sh --gpu
+DETECTOR_DEVICE=0 bash ROS1/scripts/run_demo.sh
 ```
 
 Set `DETECTOR_DEVICE=0` on subsequent GPU runs too. The latest startup checks used
@@ -123,13 +123,12 @@ Fresh editor preferences disable automatic Search indexing. For an existing
 checkout, turn off **Index on Editor startup** under **Edit → Preferences → Search**,
 then close Unity before rerunning. Existing preferences are otherwise preserved.
 
-Worker settings, cache behavior, and experimental import results are recorded in
-[startup verification](verification.md#fresh-clone-startup-after-the-memory-failure)
-and [controlled import experiments](verification.md#controlled-import-result).
-
 ## Logs and troubleshooting
 
 Each run prints its directory under `ROS1/build/camera-demo-<timestamp>-<id>/`.
+The next launch removes completed run output. Logs still used by an open Unity
+editor in manual mode are retained. Unity recovery scenes are moved to the ignored
+`Unity/UserSettings/SceneBackups/` directory before their old run is deleted.
 
 | Log | Use it for |
 | --- | --- |
@@ -162,17 +161,3 @@ Use these consistently during setup and launch when overriding defaults:
 | `DETECTOR_WEIGHTS` | `ROS1/models/package_detector.pt` |
 | `ROS_TCP_ENDPOINT_SOURCE` | `ROS1/build/ROS-TCP-Endpoint` |
 | `CAMERA_DEMO_WORKSPACE` | `ROS1/build/linux-camera-workspace` |
-
-## Spectator checks and optional import diagnostics
-
-The spectator view is independent of the mounted RGB-depth sensor. It stays in
-the central aisle at Unity X=34 m, Y=6.5 m, follows 8 m ahead along Z, and stops at
-Z=50 m. For clearance checks and six rendered previews, choose **Drone Delivery →
-Verify Warehouse Spectator Clearance** with Play stopped. See
-[spectator verification](verification.md#launcher-and-spectator-verification).
-
-`prepare_camera_demo_unity.sh` is an optional Unity-only import experiment, outside
-normal setup/run. Its stricter budgets failed to finish the recorded imports;
-they are not demo hardware requirements. See the
-[diagnostic procedure and results](verification.md#separate-import-and-cached-startup)
-for limits, memory sampling, timeout behavior, and completion checks.

@@ -8924,17 +8924,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 7279301128213619813, guid: 046381ae521b0c84d9f18d6bfae54769, type: 3}
   m_PrefabInstance: {fileID: 88079233}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &88593875 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 1081599533282264538, guid: 769ed6c4060d79629b7936923897b188, type: 3}
-  m_PrefabInstance: {fileID: 2029862899}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3f8b0d0399496f34a941124b778186a5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DroneDelivery.DeliveryPackage
 --- !u!1001 &90005220
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -89933,28 +89922,17 @@ MonoBehaviour:
   m_GameObject: {fileID: 931414668}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 886251e9a18ece04ea8e61686c173e1b, type: 3}
+  m_Script: {fileID: 11500000, guid: f4c6dc98f84a4b4eb6e980f7e8c45e62, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Unity.Cinemachine::Unity.Cinemachine.CinemachinePositionComposer
-  CameraDistance: 5
-  DeadZoneDepth: 0
-  Composition:
-    ScreenPosition: {x: 0, y: 0}
-    DeadZone:
-      Enabled: 0
-      Size: {x: 0.2, y: 0.2}
-    HardLimits:
-      Enabled: 0
-      Size: {x: 0.8, y: 0.8}
-      Offset: {x: 0, y: 0}
-  CenterOnActivate: 1
-  TargetOffset: {x: 0, y: 0, z: 0}
-  Damping: {x: 1, y: 1, z: 1}
-  Lookahead:
-    Enabled: 0
-    Time: 0
-    Smoothing: 0
-    IgnoreY: 0
+  m_EditorClassIdentifier: Assembly-CSharp::SpectatorCamera
+  aislePosition: {x: 34, y: 6.5}
+  followDistance: 8
+  maximumZ: 50
+  focusOffset: {x: 0, y: -1.5, z: 0}
+  followSmoothing: 5
+  moveSpeed: 6
+  fastMoveMultiplier: 3
+  lookSensitivity: 2
 --- !u!1001 &932138502
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -111498,54 +111476,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 486929867305780355, guid: c4678310e6088e14e977da32d420c23f, type: 3}
   m_PrefabInstance: {fileID: 1135412780}
   m_PrefabAsset: {fileID: 0}
---- !u!1 &1135482941
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1135482942}
-  - component: {fileID: 1135482943}
-  m_Layer: 0
-  m_Name: Delivery demonstration
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1135482942
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1135482941}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1135482943
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1135482941}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9d39645ec94f5ec47bfe945daee95f0b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DroneDelivery.DeliveryDemo
-  drone: {fileID: 2042285843}
-  package: {fileID: 88593875}
-  delivery: {x: 28, y: 1, z: 55}
-  speed: 1.6
 --- !u!1001 &1136125551
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -119318,10 +119248,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
-    - target: {fileID: 1233352688709371825, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
-      propertyPath: m_Enabled
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 2346774973623455758, guid: 9bd5fad8804f1b44b9bf19ed559e12fe, type: 3}
       propertyPath: m_LocalPosition.x
       value: 31
@@ -203896,17 +203822,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 6498036783387300724, guid: 129f639d9d5df44b899b19b482c7009e, type: 3}
   m_PrefabInstance: {fileID: 2042285839}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &2042285843 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 8273291543727311120, guid: 129f639d9d5df44b899b19b482c7009e, type: 3}
-  m_PrefabInstance: {fileID: 2042285839}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8945e23048c7bb74bbc4c78dfdbd3249, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DroneDelivery.PackageHandling
 --- !u!1001 &2043405670
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -214277,4 +214192,3 @@ SceneRoots:
   - {fileID: 2029862899}
   - {fileID: 2080000001}
   - {fileID: 2080000002}
-  - {fileID: 1135482942}
