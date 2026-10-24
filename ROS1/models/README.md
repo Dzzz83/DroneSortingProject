@@ -17,9 +17,8 @@ download is needed to run the demo. Verify it with
 - Runtime: confidence 0.25, 640 px, extra padded view with context scale 1.5.
   This is a simulation-specific detector, not a general package detector.
 
-The training and evaluation tools remain in `ROS1/tools/`; generated datasets,
-training runs, and virtual environments remain excluded from Git. Existing
-physical delivery evidence is described in `docs/verification.md`.
+Training and dataset-export tools were removed from the demo checkout. Generated
+environments and run logs remain excluded from Git.
 
 Ultralytics publishes YOLO code and trained models under AGPL-3.0 unless covered
 by an Enterprise license. See the [upstream license](https://www.ultralytics.com/license)

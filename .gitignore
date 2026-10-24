@@ -33,3 +33,6 @@ Thumbs.db
 
 # Local agent guidance
 /AGENTS.md
+
+# Unity crash reports
+mono_crash.*

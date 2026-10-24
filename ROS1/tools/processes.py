@@ -1,0 +1,223 @@
+"""Stop this project's previous camera demo, including container processes.
+
+Linux /proc exposes host PIDs even for Distrobox processes. Match run-specific
+arguments/environment before signalling; never kill a process by port or name.
+"""
+import argparse
+from dataclasses import dataclass
+import os
+from pathlib import Path
+import re
+import signal
+import shutil
+import subprocess
+import time
+
+SCOPE_NAME = re.compile(r'camera-delivery-\d+-\d+\.scope')
+
+
+@dataclass(frozen=True)
+class Process:
+    pid: int
+    started: str
+    arguments: tuple
+    environment: frozenset
+    scopes: frozenset
+    parent_pid: int = 0
+
+
+def read_process(pid, proc_root=Path('/proc')):
+    directory = proc_root / str(pid)
+    try:
+        if directory.stat().st_uid != os.getuid():
+            return None
+        # comm can contain spaces/parentheses; fields after its last ')' start
+        # with state (field 3), so starttime (field 22) has index 19.
+        fields = (directory / 'stat').read_text().rsplit(')', 1)[1].split()
+        if fields[0] == 'Z':
+            return None
+        arguments = tuple(filter(None, (directory / 'cmdline').read_bytes().decode().split('\0')))
+        environment = frozenset((directory / 'environ').read_bytes().decode().split('\0'))
+        scopes = frozenset(part for line in (directory / 'cgroup').read_text().splitlines()
+                           for part in line.split('/') if SCOPE_NAME.fullmatch(part))
+        return Process(int(pid), fields[19], arguments, environment, scopes, int(fields[1]))
+    except (OSError, UnicodeError, IndexError):
+        return None
+
+
+def processes():
+    return [process for entry in Path('/proc').iterdir() if entry.name.isdigit()
+            if (process := read_process(entry.name)) is not None]
+
+
+def is_project_editor(process, project):
+    arguments = process.arguments
+    if not arguments or not Path(arguments[0]).name.startswith(('Unity', 'unityhub-unity-editor')):
+        return False
+    if '-projectPath' not in arguments:
+        return False
+    index = arguments.index('-projectPath') + 1
+    return index < len(arguments) and Path(arguments[index]).resolve() == project / 'Unity'
+
+
+def owns_ros_process(process, run_directories):
+    for directory in run_directories:
+        if (f'CAMERA_DEMO_RUN_DIR={directory}' in process.environment or
+                f'ROS_LOG_DIR={directory}/ros-logs' in process.environment):
+            return True
+        for helper in ('build_workspace.sh', 'start_ros.sh'):
+            if str(directory / helper) in process.arguments:
+                return True
+    return False
+
+
+def still_running(process):
+    current = read_process(process.pid)
+    return current is not None and current.started == process.started
+
+
+def send_signal(process, action):
+    if still_running(process):
+        try:
+            os.kill(process.pid, action)
+        except ProcessLookupError:
+            pass
+
+
+def stop_processes(selected, grace=20):
+    for process in selected:
+        send_signal(process, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while any(still_running(process) for process in selected) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    for process in selected:
+        send_signal(process, signal.SIGKILL)
+    deadline = time.monotonic() + 5
+    while any(still_running(process) for process in selected) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if any(still_running(process) for process in selected):
+        raise RuntimeError('Previous demo processes did not stop; inspect their run logs.')
+
+
+def stop_scope(scope):
+    # systemd scopes include Unity import workers and the host detector. Ignore
+    # absent units left over in old log directories, but report actual failures.
+    if not Path('/run/systemd/system').exists():
+        return
+    result = subprocess.run(['systemctl', '--user', 'show', scope, '--property=ActiveState', '--value'],
+                            capture_output=True, text=True, check=False)
+    if result.stdout.strip() not in ('active', 'activating', 'deactivating'):
+        return
+    print(f'[RESTART] Closing previous demo scope: {scope}', flush=True)
+    subprocess.run(['systemctl', '--user', 'stop', '--no-block', scope], check=True)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        result = subprocess.run(['systemctl', '--user', 'show', scope, '--property=ActiveState', '--value'],
+                                capture_output=True, text=True, check=False)
+        if result.stdout.strip() not in ('active', 'activating', 'deactivating'):
+            return
+        time.sleep(0.2)
+    subprocess.run(['systemctl', '--user', 'kill', '--signal=KILL', '--kill-whom=all', scope], check=True)
+    # The following port/editor preflight also verifies shutdown before startup.
+
+
+def restart(project, current_scope, unity_mode='auto'):
+    project = project.resolve()
+    run_directories = [path.resolve() for path in (project / 'ROS1/build').glob('camera-demo-*')
+                       if path.is_dir() and not path.is_symlink()]
+    scopes = set()
+    for directory in run_directories:
+        record = directory / 'systemd-scope.txt'
+        if record.exists():
+            scope = record.read_text().strip()
+            if SCOPE_NAME.fullmatch(scope):
+                scopes.add(scope)
+    snapshot = processes()
+    editors = []
+    if unity_mode == 'auto':
+        editors = [process for process in snapshot if is_project_editor(process, project)]
+    # Recover an older project editor even if it predates scope log recording.
+    for editor in editors:
+        scopes.update(editor.scopes)
+    scopes.discard(current_scope)
+    ros = [process for process in snapshot if owns_ros_process(process, run_directories)
+           and current_scope not in process.scopes]
+    if ros:
+        print('[RESTART] Stopping previous demo ROS/build processes (including Distrobox).', flush=True)
+        stop_processes(ros)
+    if unity_mode == 'auto':
+        for scope in sorted(scopes):
+            stop_scope(scope)
+    # Without a scope, import workers still belong to their exact project editor.
+    editor_pids = {editor.pid for editor in editors}
+    while True:
+        descendants = {process.pid for process in snapshot if process.parent_pid in editor_pids}
+        if descendants <= editor_pids:
+            break
+        editor_pids.update(descendants)
+    editors = [process for process in snapshot if process.pid in editor_pids]
+    remaining_editors = [process for process in editors if still_running(process)
+                         and current_scope not in process.scopes]
+    if remaining_editors:
+        print('[RESTART] Closing this project\'s Unity editor and import workers.', flush=True)
+        stop_processes(remaining_editors)
+
+
+def active_runs(project, run_directories, snapshot):
+    """Keep logs still used by ROS processes or the project's open Unity editor."""
+    active = set()
+    for directory in run_directories:
+        for process in snapshot:
+            if owns_ros_process(process, [directory]):
+                active.add(directory)
+                break
+            if is_project_editor(process, project) and '-logFile' in process.arguments:
+                index = process.arguments.index('-logFile') + 1
+                if index < len(process.arguments):
+                    log = Path(process.arguments[index]).resolve()
+                    if directory in log.parents:
+                        active.add(directory)
+                        break
+    return active
+
+
+def discard_finished_runs(project):
+    """Discard completed run output, preserving live logs and scene recovery files."""
+    project = project.resolve()
+    runs = [path for path in (project / 'ROS1/build').glob('camera-demo-*')
+            if path.is_dir() and not path.is_symlink()
+            and (path / 'systemd-scope.txt').is_file()]
+    active = active_runs(project, runs, processes())
+    removed = 0
+    for directory in runs:
+        if directory in active:
+            continue
+        recovery = directory / 'unity-scene-backups'
+        if recovery.exists():
+            destination = project / 'Unity/UserSettings/SceneBackups' / directory.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # Refuse to overwrite existing recovery data.
+            if destination.exists():
+                raise RuntimeError('Scene recovery destination already exists: ' + str(destination))
+            shutil.move(str(recovery), str(destination))
+        shutil.rmtree(directory)
+        removed += 1
+    if removed:
+        print(f'[CLEANUP] Removed {removed} completed run directories.', flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('project', type=Path)
+    parser.add_argument('current_scope')
+    parser.add_argument('--unity-mode', choices=('auto', 'manual'), default='auto')
+    args = parser.parse_args()
+    try:
+        restart(args.project, args.current_scope, args.unity_mode)
+        discard_finished_runs(args.project)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        parser.exit(1, f'[FAIL] Restart failed: {error}\n')
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,11 @@
+<launch>
+    <!-- Read-only perception: no mission, motion, or gripper command publisher. -->
+    <arg name="detector_port" default="10001" />
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip" value="0.0.0.0" />
+        <arg name="tcp_port" value="10000" />
+    </include>
+    <node pkg="drone_sorting" type="perception.py" name="package_perception" output="screen">
+        <param name="detector_port" value="$(arg detector_port)" />
+    </node>
+</launch>
