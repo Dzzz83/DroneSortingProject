@@ -164,7 +164,7 @@ public class DroneObstacleSensorPublisher : MonoBehaviour
 
         foreach (RaycastHit hit in hits)
         {
-            if (hit.collider.transform.root == transform.root)
+            if (hit.collider.transform.IsChildOf(transform))
                 continue;
 
             if (hit.distance < nearestDistance)

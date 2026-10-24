@@ -1,0 +1,3 @@
+Loaded scene: Assets/Scenes/TwoWarehouseDelivery.unity
+Carried envelope: 3 x 2 x 2.8 m; sampled route is a fixture, never a flight controller.
+Bypass sweep failures:

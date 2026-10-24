@@ -51,6 +51,8 @@ namespace DroneDelivery
                 return;
 
             transform.SetParent(originalParent, true);
+            // A ROS move and release can arrive before the next physics step.
+            Physics.SyncTransforms();
             Owner = null;
             body.isKinematic = originalKinematic;
             body.useGravity = originalGravity;

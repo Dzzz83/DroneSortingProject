@@ -4,6 +4,11 @@ One warehouse demo: a drone finds a package with an RGB-depth camera, picks it u
 and delivers it to a sorting zone. **ROS owns the mission and movement; Unity owns
 simulation, sensors, package physics, and rendering.**
 
+This branch also includes a standalone two-warehouse Unity delivery. See the
+[Unity branch handoff](Unity/BRANCH_HANDOFF.md) for completed work, changed files,
+test evidence, limitations and how to run it. The ROS instructions below use the
+original `MainWarehouse` demo.
+
 ## Run the demo
 
 Use a **host terminal**, outside the ROS container, without `sudo`. Run the commands

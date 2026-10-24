@@ -1,0 +1,8 @@
+PASS: Saved scene enables the automatic hardcoded flight.
+PASS: Automatic flight reaches its completed delivery state. Status=Delivered in Warehouse B
+PASS: Automatic flight picked up and carried the package.
+PASS: Automatic flight releases and settles the package inside Warehouse B.
+PASS: Smooth flight completes the full route without obstacle contacts.
+PASS: ROS position callbacks cannot override local flight control.
+PASS: The completed flight can restart and pick up again.
+PASS: Reset cancels local movement and releases its package.

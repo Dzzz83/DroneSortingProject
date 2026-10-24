@@ -12,6 +12,13 @@ public class PackageActionBridge : MonoBehaviour
     private string lastAction = "";
     private bool processingAction;
 
+    public void ResetForTrial()
+    {
+        StopAllCoroutines();
+        lastAction = "";
+        processingAction = false;
+    }
+
     private void Start()
     {
         packageHandling =
@@ -46,6 +53,7 @@ public class PackageActionBridge : MonoBehaviour
 
     private void OnPackageAction(StringMsg message)
     {
+        if (!enabled) return;
         string action =
             message.data.Trim().ToUpperInvariant();
 
