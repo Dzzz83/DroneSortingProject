@@ -277,7 +277,15 @@ General route planning, repeated deliveries and automatic recovery are unfinishe
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took
 about 110 seconds in each run, within the 120-second limit. Those checks cover the
-saved route at that speed; faster settings have not yet been verified.
+saved route at that speed.
+
+A later [laptop AI feasibility probe](docs/avoidance-feasibility.md) completed one
+existing delivery at 1 m/s with GPU package inference and a temporary forward
+camera/inference load stage. The package was recorded released and stationary
+inside the destination. This qualifies a lightweight perception prototype in the
+current scene; it does not validate obstacle avoidance or the proposed larger
+course. The probe did not change the saved scene or supported demo configuration.
+
 The controller retains its command trajectory between feedback updates and waits
 if commands would lead Unity's reported position by more than `maximum_command_lead`.
 

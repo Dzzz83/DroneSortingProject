@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500">
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#137b99" stroke-width="1.8"/></marker></defs>
+<rect width="1200" height="1500" fill="white"/>
+<g font-family="Arial,DejaVu Sans,sans-serif" fill="#172b3a">
+<text x="600" y="65" text-anchor="middle" font-size="38" font-weight="700">Proposed Static Obstacle Course</text>
+<text x="600" y="106" text-anchor="middle" font-size="26">Top view with warehouse roofs omitted</text>
+<rect x="100" y="150" width="1000" height="310" rx="12" fill="#eef4f8" stroke="#344b60" stroke-width="5"/>
+<text x="135" y="198" font-size="32" font-weight="700">WAREHOUSE A</text>
+<circle cx="260" cy="292" r="27" fill="#137b99"/>
+<text x="260" y="302" text-anchor="middle" font-size="27" fill="white" font-weight="700">S</text>
+<text x="260" y="352" text-anchor="middle" font-size="28">Drone start</text>
+<rect x="510" y="245" width="180" height="110" rx="8" fill="#fff1d9" stroke="#aa6a18" stroke-width="3"/>
+<rect x="581" y="279" width="38" height="38" fill="#bf8e5d" stroke="#765331" stroke-width="2"/>
+<text x="600" y="397" text-anchor="middle" font-size="28">Package pickup</text>
+<path d="M530 460 H670" stroke="white" stroke-width="10"/>
+<path d="M530 460 H670" stroke="#71889a" stroke-width="3" stroke-dasharray="8 8"/>
+<text x="700" y="455" font-size="26">Exit A</text>
+<rect x="100" y="465" width="1000" height="570" fill="#faf9f5"/>
+<text x="135" y="510" font-size="30" font-weight="700">LOADING YARD</text>
+<g transform="translate(430 600)">
+<rect width="280" height="120" rx="5" fill="#bdc9d2" stroke="#344b60" stroke-width="3"/>
+<rect x="280" y="10" width="60" height="100" rx="8" fill="#e7bc4f" stroke="#344b60" stroke-width="3"/>
+<rect x="313" y="24" width="16" height="72" fill="#576f7d"/>
+<rect x="24" y="-7" width="44" height="12" rx="4" fill="#344b60"/><rect x="24" y="115" width="44" height="12" rx="4" fill="#344b60"/>
+<rect x="260" y="-7" width="44" height="12" rx="4" fill="#344b60"/><rect x="260" y="115" width="44" height="12" rx="4" fill="#344b60"/>
+<text x="140" y="58" text-anchor="middle" font-size="29" font-weight="700">Parked truck</text>
+<text x="140" y="94" text-anchor="middle" font-size="25">Static obstacle</text>
+</g>
+<g fill="#cfb089" stroke="#806342" stroke-width="3">
+<rect x="250" y="820" width="170" height="100" rx="4"/><path d="M306 820 V920 M363 820 V920 M250 870 H420" fill="none"/>
+<rect x="560" y="900" width="160" height="100" rx="4"/><path d="M613 900 V1000 M667 900 V1000 M560 950 H720" fill="none"/>
+</g>
+<text x="335" y="960" text-anchor="middle" font-size="27">Palletised boxes</text>
+<text x="640" y="880" text-anchor="middle" font-size="27">Box stack</text>
+<path d="M288 292 H495" fill="none" stroke="#137b99" stroke-width="5" stroke-dasharray="12 10" marker-end="url(#arrow)"/>
+<path d="M600 413 V520 H330 V760 H830 V1020 H600 V1110" fill="none" stroke="#137b99" stroke-width="5" stroke-dasharray="12 10" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="870" y="787" font-size="25" fill="#137b99">Example</text>
+<text x="870" y="819" font-size="25" fill="#137b99">bypass</text>
+<rect x="100" y="1040" width="1000" height="300" rx="12" fill="#eef4f8" stroke="#344b60" stroke-width="5"/>
+<path d="M530 1040 H670" stroke="white" stroke-width="10"/>
+<path d="M530 1040 H670" stroke="#71889a" stroke-width="3" stroke-dasharray="8 8"/>
+<path d="M600 1042 V1110" fill="none" stroke="#137b99" stroke-width="5" stroke-dasharray="12 10" marker-end="url(#arrow)"/>
+<text x="700" y="1084" font-size="26">Entrance B</text>
+<text x="135" y="1130" font-size="32" font-weight="700">WAREHOUSE B</text>
+<rect x="490" y="1130" width="220" height="125" rx="8" fill="#dcefe2" stroke="#39764b" stroke-width="3"/>
+<text x="600" y="1180" text-anchor="middle" font-size="29" font-weight="700">Delivery</text>
+<text x="600" y="1220" text-anchor="middle" font-size="27">area</text>
+<text x="600" y="1301" text-anchor="middle" font-size="26">Release the package and confirm placement</text>
+<path d="M120 1392 H205" stroke="#137b99" stroke-width="5" stroke-dasharray="12 10"/>
+<text x="225" y="1401" font-size="27">Illustrative route only</text>
+<text x="600" y="1454" text-anchor="middle" font-size="26">Not to scale. ROS determines the actual route.</text>
+</g></svg>
