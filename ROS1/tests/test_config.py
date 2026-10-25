@@ -75,13 +75,18 @@ class LinuxConfigurationTests(unittest.TestCase):
 
 class MissionConfigurationTests(unittest.TestCase):
     def test_supported_mission_settings_are_known_and_valid(self):
+        for profile in ('demo.yaml', 'course.yaml'):
+            with self.subTest(profile=profile):
+                self.check_mission_settings(profile)
+
+    def check_mission_settings(self, profile):
         # Validate editable configuration without requiring it to equal Python fallbacks.
         from dataclasses import fields
         import math
         import yaml
         from drone_sorting.mission.delivery_guidance import DeliverySettings, ObservationAccessSettings
         from drone_sorting.mission.pickup_guidance import PickupSettings
-        config = yaml.safe_load((ROOT / 'ROS1/package/config/demo.yaml').read_text())
+        config = yaml.safe_load((ROOT / 'ROS1/package/config' / profile).read_text())
         mission = config['camera_pickup']
         known_fields = set()
         for kind in (DeliverySettings, ObservationAccessSettings, PickupSettings):

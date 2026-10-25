@@ -1,0 +1,29 @@
+{
+  "course": {
+    "reset_sequence": 0,
+    "package_attached": false,
+    "delivered": true,
+    "collision_observed": false,
+    "contact": "",
+    "package_position": {
+      "x": 34.0,
+      "y": 119.5,
+      "z": 0.4399999976158142
+    }
+  },
+  "status": [
+    "PICKUP_DONE",
+    "DROP_DONE"
+  ],
+  "rgb": 243,
+  "depth": 243,
+  "sensors": [
+    -1.0,
+    -1.0,
+    0.0,
+    -1.0,
+    -1.0,
+    -1.0,
+    0.5100001096725464
+  ]
+}

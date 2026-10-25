@@ -4,10 +4,10 @@ One warehouse demo: a drone finds a package with an RGB-depth camera, picks it u
 and delivers it to a sorting zone. **ROS owns the mission and movement; Unity owns
 simulation, sensors, package physics, and rendering.**
 
-This branch also includes a standalone two-warehouse Unity delivery. See the
+This branch also includes a ROS-controlled two-warehouse course. See the
 [Unity branch handoff](Unity/BRANCH_HANDOFF.md) for completed work, changed files,
 test evidence, limitations and how to run it. The ROS instructions below use the
-original `MainWarehouse` demo.
+original `MainWarehouse` demo unless `--course` is selected.
 
 ## Run the demo
 
@@ -18,6 +18,7 @@ from the **repository root**: the folder containing `README.md`, `ROS1/` and `Un
 | --- | --- |
 | First setup or dependencies changed | `bash ROS1/scripts/setup_demo.sh` |
 | Every run or restart | `bash ROS1/scripts/run_demo.sh` |
+| Two-warehouse course | `bash ROS1/scripts/run_demo.sh --course` |
 
 ### First-time setup
 
@@ -64,6 +65,25 @@ and the **Game** view available. The saved scene is `Unity/Assets/Scenes/MainWar
 Stop Play in Unity, then press **Ctrl+C** in the launcher terminal to stop ROS and
 YOLO. Unity stays open. Save any edits, then use the same run command above to
 start a fresh attempt.
+
+### Two-warehouse course
+
+Use `bash ROS1/scripts/run_demo.sh --course` after setup. This opens
+`TwoWarehouseDelivery` and loads `ROS1/package/config/course.yaml`; wait for
+`[READY]`, then press Play. ROS owns movement and package actions. The saved scene
+disables `HardcodedWarehouseFlight`; keep it disabled for ROS operation.
+
+The course profile observes the package near ROS `(34, 55)`, delivers to
+`(34, 119.5)`, and uses a 3 m drone-root cruising height for the 4.5 m entrances.
+Its pickup bounds, release height and travel timeout match the new layout.
+Changing these settings does not create a safe route. Autonomous avoidance on
+this course still requires validation. The original command and `demo.yaml`
+retain their existing behavior. See [course coordinates and controls](Unity/TWO_WAREHOUSE.md).
+
+A live ROS-TCP smoke test completed pickup, a known bypass and settled delivery
+inside B with no reported contacts. This checks transport and package mechanics;
+the full detector-guided mission and autonomous avoidance remain unvalidated.
+[Verification details](Unity/Verification/ros-control-fixes.md).
 
 ## Installation
 
@@ -185,7 +205,7 @@ press Play. Verify obstacle avoidance, pickup and final placement at the new spe
 | --- | --- |
 | `ROS1/scripts/{setup_demo,run_demo}.sh` | The two supported user commands |
 | `ROS1/scripts/internal/` | Environment selection, workspace build and ROS supervision |
-| `ROS1/package/config/demo.yaml` | Supported mission, controller and perception tuning |
+| `ROS1/package/config/{demo,course}.yaml` | Original demo and two-warehouse mission/controller/perception settings |
 | `ROS1/package/launch/` | Start ROS nodes and TCP endpoint; load configuration |
 | `ROS1/package/nodes/` | Thin ROS entry points; `monitor.py` prints terminal status |
 | `ROS1/package/python/drone_sorting/` | Actual mission, control and perception implementation |
@@ -277,7 +297,9 @@ then run ROS and Unity together and inspect physical pickup and placement.
 
 ## Current Status
 
-One supported warehouse scene, one motion controller and two public scripts.
+The original warehouse demo and a two-warehouse course profile share one motion
+controller and two public scripts. The course defaults to ROS control; spectator
+cutaways affect only the viewing camera, preserving sensor geometry and colliders.
 General route planning, repeated deliveries and automatic recovery are unfinished.
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took

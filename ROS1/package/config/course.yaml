@@ -1,0 +1,57 @@
+# Warehouse distances are metres, speeds are metres/second, times are seconds.
+# ROS X/Y are horizontal (Unity X/Z); ROS Z is vertical (Unity Y).
+# TwoWarehouseDelivery profile. The 3 m drone-root height fits the 4.5 m entrances.
+# The forklift and stacks intersect this height; avoidance is still unvalidated.
+camera_pickup:
+  # Fly from DroneStart to this observation point before selecting a package.
+  observation_x: 34.0
+  observation_y: 55.0
+  observation_height: 3.0
+  access_speed: 1
+  access_timeout: 60.0
+  hover_time: 1.0
+
+  # Final delivery destination; heights refer to the drone root, not the package.
+  dropoff_x: 34.0
+  dropoff_y: 119.5
+  carry_height: 3.0
+  release_height: 1.6
+  carry_speed: 1
+  lowering_speed: 0.2
+  travel_timeout: 240.0
+  drop_timeout: 5.0
+  settle_time: 2.0
+
+  # Package alignment, grasp and feedback limits.
+  mount_offset: 0.95
+  approach_clearance: 1.4
+  lift_clearance: 1.0
+  arrival_tolerance: 0.03
+  association_radius: 0.25
+  stability_tolerance: 0.04
+  required_observations: 3
+  maximum_age: 1.0
+  observation_timeout: 15.0
+  loss_timeout: 3.0
+  phase_timeout: 35.0
+  pickup_timeout: 5.0
+  approach_speed: 0.5
+  descent_speed: 0.2
+  lift_speed: 0.3
+
+motion_controller:
+  # Maximum distance (metres) a command may lead reported Unity position.
+  maximum_command_lead: 0.25
+  enable_obstacle_avoidance: true
+  speed: 1.0
+  enable_dynamic_speed: true
+  position_timeout: 0.5
+  target_timeout: 0.5
+  speed_timeout: 0.5
+
+package_perception:
+  maximum_age: 1.5
+  # [minimum X, maximum X, minimum Y, maximum Y] in ROS warehouse coordinates.
+  pickup_bounds: [31.5, 36.5, 52.5, 57.5]
+  # Accepted package top-surface heights above the warehouse floor.
+  surface_height_range: [0.2, 1.2]

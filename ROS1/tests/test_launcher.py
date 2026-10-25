@@ -18,7 +18,7 @@ class LauncherTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('always restarts the demo', result.stderr)
 
-    def run_launcher(self, with_cache=True, failed_import=False, stop_at_restart=False, **overrides):
+    def run_launcher(self, with_cache=True, failed_import=False, stop_at_restart=False, arguments=(), **overrides):
         environment = dict(os.environ, UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true',
                            CAMERA_DEMO_MEMORY_MODE='off', CAMERA_DEMO_MIN_AVAILABLE_GIB='0.01')
         environment.update(overrides)
@@ -28,6 +28,11 @@ class LauncherTests(unittest.TestCase):
             scene = project / 'Unity/Assets/Scenes/MainWarehouse.unity'
             scene.parent.mkdir(parents=True)
             scene.touch()
+            (scene.parent / 'TwoWarehouseDelivery.unity').touch()
+            configuration = project / 'ROS1/package/config'
+            configuration.mkdir(parents=True)
+            for profile in ('demo.yaml', 'course.yaml'):
+                (configuration / profile).write_text('{}\n')
             if with_cache:
                 for name in ('ArtifactDB', 'SourceAssetDB', 'ScriptAssemblies/Assembly-CSharp.dll'):
                     cache = project / 'Unity/Library' / name
@@ -43,8 +48,27 @@ class LauncherTests(unittest.TestCase):
                 restart_source = 'raise SystemExit(73)\n'
             (tools / 'processes.py').write_text(restart_source)
             environment['PROJECT_ROOT'] = temporary
-            return subprocess.run(['bash', str(LAUNCHER)], env=environment,
+            return subprocess.run(['bash', str(LAUNCHER), *arguments], env=environment,
                                   capture_output=True, text=True, timeout=20)
+
+    def test_course_option_reaches_startup_admission(self):
+        with tempfile.NamedTemporaryFile() as weights:
+            result = self.run_launcher(arguments=('--course',), stop_at_restart=True,
+                                       DETECTOR_WEIGHTS=weights.name)
+            self.assertEqual(result.returncode, 73, result.stderr)
+
+    def test_profiles_pair_scene_and_ros_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for profile, scene, config in (('warehouse', 'MainWarehouse', 'demo.yaml'),
+                                           ('course', 'TwoWarehouseDelivery', 'course.yaml')):
+                result = subprocess.run(
+                    ['bash', '-c', 'source "$1"; configure_demo_profile; printf "%s\\n" "$DEMO_SCENE" "$DEMO_CONFIG"',
+                     'bash', str(ROOT / 'ROS1/scripts/internal/config.sh')],
+                    env=dict(os.environ, PROJECT_ROOT=temporary, DEMO_PROFILE=profile),
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(),
+                                 [scene, temporary + '/ROS1/package/config/' + config])
 
 
     def test_missing_unity_has_actionable_error(self):

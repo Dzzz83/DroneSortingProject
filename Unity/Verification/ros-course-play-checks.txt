@@ -1,0 +1,38 @@
+PASS: Saved course defaults to ROS control with local flight disabled.
+PASS: Without ROS commands the drone waits at its start with both handlers enabled.
+PASS: Initial drone and package have no contacts.
+PASS: Non-finite ROS position is rejected.
+PASS: Distance sensor sees a sibling obstacle under a shared root.
+PASS: Swept collision reports crossing a thin wall between ROS commands.
+PASS: Reset restores initial transforms and clears observations.
+PASS: Drone body collision leaves the package mount unobstructed.
+PASS: Real gripper closes and attaches the package through the ROS action handler.
+PASS: Carried fixture segment is clear at (34.00, 3.00, 55.00)
+PASS: Carried fixture segment is clear at (34.00, 3.00, 71.00)
+PASS: Carried fixture segment is clear at (25.00, 3.00, 71.00)
+PASS: Carried fixture segment is clear at (25.00, 3.00, 87.00)
+PASS: Carried fixture segment is clear at (43.00, 3.00, 87.00)
+PASS: Carried fixture segment is clear at (43.00, 3.00, 103.00)
+PASS: Carried fixture segment is clear at (34.00, 3.00, 103.00)
+PASS: Carried fixture segment is clear at (34.00, 3.00, 119.50)
+PASS: Package stays attached through both doorways and the yard bypass.
+PASS: ROS drop releases the physical package.
+PASS: Release alone does not confirm delivery.
+PASS: Whole package settles inside Warehouse B before delivery confirmation. Position=(34.00, 0.44, 119.50) velocity=(0.00, 0.00, 0.00)
+PASS: Physical carry and release finish without obstacle contacts.
+PASS: A package straddling the delivery boundary is rejected.
+PASS: Reset permits a fresh PICKUP action.
+PASS: Reset during gripper closure cancels the pending attachment.
+PASS: HDRP RGB and metric depth capture return matching image dimensions.
+PASS: RGB contains scene detail and metric depth contains finite surface measurements.
+PASS: Sensor detects roof-layer geometry at the expected metric depth: 2.899993
+PASS: Spectator view 0 preserves roof visibility and sensor depth.
+PASS: Spectator view 0 preserves the stationary RGB roof measurement.
+PASS: Only spectator cutaway views exclude the roof layer.
+PASS: Spectator view 1 preserves roof visibility and sensor depth.
+PASS: Spectator view 1 preserves the stationary RGB roof measurement.
+PASS: Only spectator cutaway views exclude the roof layer.
+PASS: Spectator view 2 preserves roof visibility and sensor depth.
+PASS: Spectator view 2 preserves the stationary RGB roof measurement.
+PASS: Only spectator cutaway views exclude the roof layer.
+PASS: Repeatable resets expose a monotonically increasing trial sequence.

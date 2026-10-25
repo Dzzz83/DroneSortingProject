@@ -2,13 +2,19 @@
 
 Branch: `codex/two-warehouse-flight`
 Base: `c572044` (`main` at the start of this work)
-Verification recorded: 25 October 2026, Unity 6000.6.0f1 on Windows.
+Original verification: 25 October 2026, Unity 6000.6.0f1 on Windows.
+ROS-default follow-up: [Linux fix verification](Verification/ros-control-fixes.md).
+
+The course now defaults to ROS control. Local flight is opt-in, spectator
+cutaways preserve sensor rendering, and `run_demo.sh --course` selects the new
+scene and ROS configuration together. The original 34-assertion evidence below
+describes the initial branch; follow-up checks are recorded separately.
 
 ## Completed
 
 - Added a separate two-warehouse scene with a static loading yard, parked forklift,
   pallet/cardboard assets, box obstacle, pickup pad, delivery pad and wider doorways.
-- Added a local A-to-B flight that starts on Play: pickup with the existing gripper,
+- Added an optional local A-to-B flight: pickup with the existing gripper,
   carry around the obstacles, release inside B, confirm settling, then hover.
 - Added physical reset and replay controls, attachment/delivery/contact observations,
   and an increasing reset sequence for repeated trials.
@@ -21,14 +27,14 @@ Verification recorded: 25 October 2026, Unity 6000.6.0f1 on Windows.
 
 ## Run and replay
 
-Open `Unity/` with **Unity 6000.6.0f1**, open
-`Assets/Scenes/TwoWarehouseDelivery.unity`, and press **Play**. The local demo
-needs no ROS server. In the Game view, use **Reset physical trial** to stop/reset,
-**Start A to B flight** to replay, and keys **1**, **2**, **3** to change views.
+After setup, run `bash ROS1/scripts/run_demo.sh --course`, wait for `[READY]`,
+then press Play. Keep `HardcodedWarehouseFlight` disabled in the saved scene.
+To demonstrate the offline local flight, enable it manually before Play and
+disable it again before saving the ROS course. Keys **1**, **2**, **3** change
+views; the HUD provides physical reset and optional local replay controls.
 
-To use ROS control, stop Play, disable `HardcodedWarehouseFlight` on the drone,
-and enter Play again with the ROS endpoint running. The ROS mission still needs
-coordinates for this scene. Full coordinates, topics and reset rules are in
+The new course profile supplies the scene's ROS coordinates and heights.
+Full coordinates, topics and reset rules are in
 [TWO_WAREHOUSE.md](TWO_WAREHOUSE.md).
 
 ## Changed files
@@ -39,10 +45,10 @@ includes its `.meta` file so scene references survive a fresh checkout.
 | File | Change and purpose |
 | --- | --- |
 | `README.md` | Links this branch's Unity demo and handoff from the repository entry point. |
-| `Unity/Assets/Scenes/TwoWarehouseDelivery.unity` | New saved two-warehouse scene, fixed obstacles, loading openings, pads, markers, collision geometry, cameras and enabled local flight component. |
+| `Unity/Assets/Scenes/TwoWarehouseDelivery.unity` | New saved two-warehouse scene, fixed obstacles, loading openings, pads, markers, collision geometry, cameras and disabled optional local flight component. |
 | `Unity/Assets/Scripts/Warehouse/HardcodedWarehouseFlight.cs` | New smooth waypoint sequence at 3 m/s, cruise height 3 m, pickup hover 8 cm above the settled package, physical pickup/release, settling wait, collision stop, cancellation and replay. Disables ROS movement/action handlers while owning control. |
 | `Unity/Assets/Scripts/Warehouse/WarehouseCourse.cs` | New physical observations, swept box contacts, whole-package delivery confirmation, trial reset and HUD. Confirmation requires a previously picked-up package to be released and still inside B for 0.5 simulated seconds. |
-| `Unity/Assets/Scripts/Warehouse/WarehouseCourseViews.cs` | New overview, follow and yard views; cutaway views hide roof renderers while retaining their colliders. |
+| `Unity/Assets/Scripts/Warehouse/WarehouseCourseViews.cs` | Overview, follow and yard views; cutaways exclude the roof layer only from the spectator camera. |
 | `Unity/Assets/Scripts/Packages/DeliveryPackage.cs` | Synchronizes transforms before restoring dynamic physics, so movement and release in one frame use the current mount pose. |
 | `Unity/Assets/Scripts/ROS/DroneCommandSubscriber.cs` | Rejects non-finite position values, respects disabled local-control interlocks and records swept contacts before applying a ROS position. |
 | `Unity/Assets/Scripts/ROS/DroneObstacleSensorPublisher.cs` | Ignores the drone's own descendants rather than every collider sharing its root; grouped sibling obstacles remain detectable. |
@@ -97,9 +103,10 @@ while those Play checks run. New results are written to `Unity/Library/`.
 
 ## Not tested
 
-- Live ROS-TCP transport, the real ROS mission, connection loss/reconnection,
+- The real detector-guided ROS mission, connection loss/reconnection,
   stale queued network commands, or switching control modes against a live ROS graph.
-  Handler checks call Unity callbacks locally; they do not establish TCP integration.
+  Original handler checks call Unity callbacks locally. The follow-up report records
+  a separate live ROS-TCP known-route smoke test; it does not cover these behaviors.
 - Heuristic avoidance, YOLO/AI avoidance, planner integration or algorithm comparison.
 - Changed layouts, moved/dynamic obstacles, other package placements, sizes, masses,
   drone scales, speed settings or rotated delivery volumes.
@@ -119,8 +126,9 @@ while those Play checks run. New results are written to `Unity/Library/`.
   contact or a pickup/release/settling failure; it does not replan or recover.
 - Movement is kinematic translation, with no yaw steering, realistic flight forces
   or sensor-driven navigation. It demonstrates delivery mechanics and clearance.
-- The default scene runs local flight and disables ROS auto-connect for that mode.
-  Stop Play and disable the component before starting ROS operation. ROS must own
+- The default scene uses ROS control. Optional local flight disables ROS
+  auto-connect for that mode. Stop Play and disable the component before returning
+  to ROS operation. ROS must own
   mission reset, discard stale commands and use the new scene coordinates.
 - The existing ROS position interface applies absolute positions directly.
   Collision sweeps report crossings but do not block ROS movement. Contact state

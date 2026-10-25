@@ -50,7 +50,12 @@ isolate_demo_processes() {
 }
 
 check_dependencies() {
-    [[ $# == 0 ]] || fail 'Usage: bash ROS1/scripts/run_demo.sh (always restarts the demo)'
+    if [[ $# == 1 && "$1" == --course ]]; then
+        DEMO_PROFILE=course
+    elif [[ $# != 0 ]]; then
+        fail 'Usage: bash ROS1/scripts/run_demo.sh [--course] (always restarts the demo)'
+    fi
+    configure_demo_profile
     [[ "$(uname -s)" == Linux ]] || fail 'This launcher supports native Linux with ROS Noetic or Distrobox.'
     if grep -qi microsoft /proc/version; then fail 'Use the documented Windows/WSL workflow; this launcher opens host Linux Unity.'; fi
     for command_name in python3 flock realpath; do
@@ -62,7 +67,8 @@ check_dependencies() {
     [[ "$UNITY_MODE" == manual || -x "$UNITY_EDITOR" ]] || fail "Unity Editor not found: $UNITY_EDITOR (set UNITY_EDITOR or UNITY_MODE=manual)."
     [[ -x "$DETECTOR_PYTHON" ]] || fail "Detector Python not found: $DETECTOR_PYTHON (run setup_demo.sh or set DETECTOR_PYTHON)."
     [[ -f "$DETECTOR_WEIGHTS" ]] || fail "Trained package weights not found: $DETECTOR_WEIGHTS (set DETECTOR_WEIGHTS)."
-    [[ -f "$PROJECT_ROOT/Unity/Assets/Scenes/MainWarehouse.unity" ]] || fail 'MainWarehouse scene is missing.'
+    [[ -f "$PROJECT_ROOT/Unity/Assets/Scenes/$DEMO_SCENE.unity" ]] || fail "$DEMO_SCENE scene is missing."
+    [[ -f "$DEMO_CONFIG" ]] || fail "Demo configuration is missing: $DEMO_CONFIG"
     check_unity_assets
     validate_camera_workspace
     select_ros_environment
@@ -151,7 +157,8 @@ wait_for_ros() {
 
 open_unity() {
     if [[ "$UNITY_MODE" == manual ]]; then
-        echo "[INFO] Open $PROJECT_ROOT/Unity in Unity 6000.6.0f1, select MainWarehouse, connect to 127.0.0.1:10000, then press Play."
+        configure_demo_profile
+        echo "[INFO] Open $PROJECT_ROOT/Unity in Unity 6000.6.0f1, select $DEMO_SCENE, connect to 127.0.0.1:10000, then press Play."
         return
     fi
     mkdir -p "$PROJECT_ROOT/Unity/UserSettings"
@@ -162,7 +169,8 @@ open_unity() {
         mv "$PROJECT_ROOT/Unity/Temp/__Backupscenes" "$RUN_DIR/unity-scene-backups"
         echo "[RESTART] Preserved Unity recovery scenes: $RUN_DIR/unity-scene-backups"
     fi
-    "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -job-worker-count 4 \
+    configure_demo_profile
+    "$UNITY_EDITOR" -projectPath "$PROJECT_ROOT/Unity" -demoScene "$DEMO_SCENE" -job-worker-count 4 \
         -desiredWorkerCount 1 -standbyWorkerCount 1 -idleWorkerShutdownDelay 1000 \
         -executeMethod DemoLauncher.Prepare \
         -logFile "$RUN_DIR/unity.log" > "$RUN_DIR/unity-start.log" 2>&1 &
@@ -210,7 +218,7 @@ echo "[1/4] Preparing ROS workspace. Logs: $RUN_DIR"
 ROS_WRAPPER_PID=$!
 wait "$ROS_WRAPPER_PID" || { [[ -f "$RUN_DIR/build.log" ]] && tail -40 "$RUN_DIR/build.log"; fail 'ROS preparation failed.'; }
 ROS_WRAPPER_PID=''
-echo '[2/4] Opening MainWarehouse; waiting for editor background work. Wait for READY before pressing Play.'
+echo "[2/4] Opening $DEMO_SCENE; waiting for editor background work. Wait for READY before pressing Play."
 open_unity 8>&- 9>&-
 echo '[3/4] Starting the YOLO detector on the host.'
 CAMERA_DEMO_RUN_DIR="$RUN_DIR" "$DETECTOR_PYTHON" "$PROJECT_ROOT/ROS1/tools/detector.py" \
@@ -220,7 +228,7 @@ DETECTOR_PID=$!
 wait_for_detector
 
 echo '[4/4] Starting ROS camera delivery.'
-"${ROS_RUNNER[@]}" "$RUN_DIR/start_ros.sh" "$PROJECT_ROOT" "$WORKSPACE" "$RUN_DIR" \
+"${ROS_RUNNER[@]}" "$RUN_DIR/start_ros.sh" "$PROJECT_ROOT" "$WORKSPACE" "$RUN_DIR" "$DEMO_CONFIG" \
     > "$RUN_DIR/ros-supervisor.log" 2>&1 8>&- 9>&- &
 ROS_WRAPPER_PID=$!
 wait_for_ros

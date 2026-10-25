@@ -5,15 +5,17 @@ limits, see [the branch handoff](BRANCH_HANDOFF.md).
 
 Open this folder (`Unity/`) with Unity **6000.6.0f1**, then open
 `Assets/Scenes/TwoWarehouseDelivery.unity`. The original `MainWarehouse` scene
-is preserved. Press Play to run the local hardcoded delivery described below.
-For ROS control, disable the local flight component before Play; ROS then owns
+is preserved. The saved scene has local flight disabled. ROS owns
 movement, pickup/drop commands, navigation, mission state and comparison metrics.
-The old one-warehouse ROS mission coordinates must be updated by the avoidance team
-before they can run a mission on this new layout.
+Use `bash ROS1/scripts/run_demo.sh --course` from the repository root to select this
+scene and `ROS1/package/config/course.yaml` together. Wait for `[READY]`, then press
+Play. The original command still selects MainWarehouse and demo.yaml. Autonomous
+avoidance on the new course remains unvalidated.
 
 ## Hardcoded flight demo
 
-The saved scene now runs a local **A to B delivery automatically when Play starts**.
+For an offline demonstration only, enable `HardcodedWarehouseFlight` on the drone
+before Play. It then runs a local **A to B delivery automatically when Play starts**.
 It ascends, aligns the real package mount, closes the gripper, flies the fixed
 bypass at 3 m/s and Unity Y=3 m, lowers the package in B, releases it, waits for
 settled delivery, then ascends and hovers. No ROS server is required in this mode.
@@ -23,11 +25,13 @@ including zero obstacle contacts, replay and reset while carrying. Use **Reset p
 
 The enabled `HardcodedWarehouseFlight` component owns movement and package actions;
 ROS command callbacks are blocked while it owns control. For ROS-driven operation,
-stop Play, uncheck this component on the drone, and enter Play again. The local
-mode is a demonstration of the saved static layout, not an avoidance algorithm.
+stop Play, uncheck this component on the drone, and enter Play again. Leave it
+disabled when saving the ROS course; the ROS launcher rejects an enabled local
+controller. The local mode demonstrates the saved static layout; it does not
+perform obstacle avoidance.
 Select **Drone Delivery > Verify Hardcoded A to B Flight** for the actual smooth
-flight, pickup, delivery, restart and reset checks. The ordinary course checks
-temporarily disable the automatic flight so their fixtures stay independent.
+flight, pickup, delivery, restart and reset checks. This fixture explicitly enables
+local flight for its run. Ordinary course checks require the saved ROS default.
 
 ## Scene and controls
 
@@ -40,8 +44,9 @@ an interior passage in each warehouse. Each new visible wall has matching
 collision geometry; original retained structure uses mesh colliders.
 
 In the focused Game view: **1** shows the overall cutaway, **2** follows the drone,
-and **3** shows the loading yard. Cutaway views hide upper roof renderers while
-retaining their colliders. The HUD reports attachment, settled delivery and
+and **3** shows the loading yard. Cutaway views exclude the `CourseRoof` layer only
+from the spectator camera. Roof renderers stay enabled for RGB-depth sensors and
+their colliders remain active. The HUD reports attachment, settled delivery and
 whether any obstacle contact has occurred since reset. Its reset button restores
 the saved drone/package poses and cancels pending gripper actions.
 
@@ -57,6 +62,12 @@ Pickup/drop commands control the existing package handler. The package centre
 marker is not the drone command position: account for its package mount offset
 when positioning the drone. Both pads are 5 x 5 m. Their tops are at Unity Y=0.14.
 The observation volume covers X=[31.5,36.5], Z=[117,122], Y=[0.1,1.7].
+
+The ROS course profile uses observation `(34,55,3)`, delivery horizontal target
+`(34,119.5)`, carry height 3 m and release height 1.6 m. Heights refer to the drone
+root. Pickup bounds are `[31.5,36.5,52.5,57.5]`. The 240-second travel timeout
+allows for detours at the configured 1 m/s ceiling; it is not evidence that the
+existing heuristic can complete the course.
 
 ## Observations and reset
 
@@ -114,7 +125,9 @@ Reports and 1280 x 720 view captures are written under `Unity/Library/`:
 `course-verification.txt`, `course-play-checks.txt`, `course-view-0.png` (overview),
 `course-view-1.png` (follow), and `course-view-2.png` (yard).
 
-Verification on 25 October 2026: all 26 Play checks passed, including a physical
+Current ROS-default verification is recorded in
+[the fix verification report](Verification/ros-control-fixes.md).
+Original Windows verification on 25 October 2026: all 26 Play checks passed, including a physical
 release that settled at Unity (34, 0.44, 119.5). All three views were captured
 and visually reviewed. No additional packages or dependencies were added.
 

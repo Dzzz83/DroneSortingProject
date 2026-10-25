@@ -1,5 +1,6 @@
 <launch>
-    <rosparam command="load" file="$(find drone_sorting)/config/demo.yaml" />
+    <arg name="config" default="$(find drone_sorting)/config/demo.yaml" />
+    <rosparam command="load" file="$(arg config)" />
     <include file="$(find drone_sorting)/launch/perception.launch" />
     <node pkg="drone_sorting" type="mission.py" name="camera_pickup" output="screen" />
     <node pkg="drone_sorting" type="motion_controller.py" name="motion_controller" output="screen" />

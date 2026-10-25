@@ -5,6 +5,7 @@ set -eo pipefail
 PROJECT_ROOT="$1"
 WORKSPACE="$2"
 RUN_DIR="$3"
+DEMO_CONFIG="${4:-$PROJECT_ROOT/ROS1/package/config/demo.yaml}"
 export CAMERA_DEMO_RUN_DIR="$RUN_DIR"
 source /opt/ros/noetic/setup.bash
 source "$WORKSPACE/devel/setup.bash"
@@ -31,7 +32,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 printf '%s\n' "$$" > "$RUN_DIR/ros-supervisor.pid"
 
-roslaunch --screen drone_sorting demo.launch > "$RUN_DIR/ros.log" 2>&1 &
+roslaunch --screen drone_sorting demo.launch config:="$DEMO_CONFIG" > "$RUN_DIR/ros.log" 2>&1 &
 LAUNCH_PID=$!
 
 required_nodes=(/unity_endpoint /package_perception /camera_pickup /motion_controller)

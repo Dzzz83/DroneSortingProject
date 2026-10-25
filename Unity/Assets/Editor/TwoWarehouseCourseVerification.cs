@@ -28,6 +28,9 @@ public static class TwoWarehouseCourseVerification
         SessionState.SetBool("TwoWarehouse.FlightVerification", false);
         if (Application.isBatchMode) UnityEditor.SceneManagement.EditorSceneManager.OpenScene(TwoWarehouseCourseBuilder.ScenePath);
         TwoWarehouseCourseBuilder.Verify();
+        var flight=UnityEngine.Object.FindAnyObjectByType<HardcodedWarehouseFlight>();
+        if(flight == null || flight.enabled)
+            throw new InvalidOperationException("The saved ROS course must have local flight disabled.");
         // The runtime initializer disables the network only for this editor fixture.
         SessionState.SetBool(Running,true);
         EditorApplication.isPlaying=true;
@@ -40,10 +43,11 @@ public static class TwoWarehouseCourseVerification
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void PrepareFixture()
     {
-        if (SessionState.GetBool(Running,false) && !SessionState.GetBool("TwoWarehouse.FlightVerification",false))
+        if (SessionState.GetBool(Running,false))
         {
             var flight=UnityEngine.Object.FindAnyObjectByType<HardcodedWarehouseFlight>();
-            if(flight != null) flight.enabled=false;
+            // Local flight is enabled only for its explicitly selected offline fixture.
+            if(flight != null) flight.enabled=SessionState.GetBool("TwoWarehouse.FlightVerification",false);
         }
     }
 
@@ -63,7 +67,7 @@ public static class TwoWarehouseCourseVerification
         Time.timeScale=4;
         double deadline=EditorApplication.timeSinceStartup+90;
         var flight=UnityEngine.Object.FindAnyObjectByType<HardcodedWarehouseFlight>();
-        Require(flight != null && flight.enabled,"Saved scene enables the automatic hardcoded flight.");
+        Require(flight != null && flight.enabled,"Explicit flight fixture enables the local demonstration.");
         var course=flight.GetComponent<WarehouseCourse>();
         bool carried=false;
         yield return null;
@@ -124,6 +128,11 @@ public static class TwoWarehouseCourseVerification
         var command=drone.GetComponent<DroneCommandSubscriber>();
         var bridge=drone.GetComponent<PackageActionBridge>();
         Vector3 initialDrone=drone.transform.position, initialPackage=GameObject.Find("PickupPoint").transform.position;
+        var localFlight=drone.GetComponent<HardcodedWarehouseFlight>();
+        Require(localFlight != null && !localFlight.enabled && !localFlight.IsFlying,
+            "Saved course defaults to ROS control with local flight disabled.");
+        Require(command.enabled && bridge.enabled && drone.transform.position==GameObject.Find("DroneStart").transform.position,
+            "Without ROS commands the drone waits at its start with both handlers enabled.");
         Require(!course.CollisionObserved,"Initial drone and package have no contacts.");
         Send(command,new Vector3(float.NaN,1,1));
         Require(drone.transform.position==initialDrone,"Non-finite ROS position is rejected.");
@@ -195,12 +204,60 @@ public static class TwoWarehouseCourseVerification
         var views=Camera.main.GetComponent<WarehouseCourseViews>();
         for(int view=0;view<3;view++)
         {
-            typeof(WarehouseCourseViews).GetField("view",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(views,view);
+            views.SelectView(view);
             wait=EditorApplication.timeSinceStartup+.5;
             while(EditorApplication.timeSinceStartup<wait) yield return null;
             Capture(Camera.main,"Library/course-view-"+view+".png");
         }
+        CheckSensorViews(views,drone);
         Require(course.ResetSequence==3,"Repeatable resets expose a monotonically increasing trial sequence.");
+    }
+
+    static void CheckSensorViews(WarehouseCourseViews views,PackageHandling drone)
+    {
+        var sensor=DroneRgbCamera.EnsureOnDrone(drone.gameObject);
+        Vector3 originalPosition=sensor.transform.localPosition;
+        Quaternion originalRotation=sensor.transform.localRotation;
+        int roofLayer=LayerMask.NameToLayer(WarehouseCourseViews.RoofLayerName);
+        var probe=GameObject.CreatePrimitive(PrimitiveType.Cube);
+        probe.name="Sensor roof visibility fixture";
+        probe.layer=roofLayer;
+        probe.GetComponent<Renderer>().sharedMaterial=AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/CourseWall.mat");
+        // Isolate the roof probe from the drone body, which occludes an upward camera.
+        sensor.transform.position=new Vector3(-200,10,-200);
+        sensor.transform.rotation=Quaternion.LookRotation(Vector3.up,Vector3.forward);
+        probe.transform.position=sensor.transform.position+Vector3.up*3;
+        probe.transform.localScale=new Vector3(4,.2f,4);
+        try
+        {
+            using(var capture=new RgbDepthCapture(sensor))
+            {
+                var baseline=capture.Capture();
+                int centre=(baseline.Height/2)*baseline.Width+baseline.Width/2;
+                Require(Mathf.Abs(baseline.DepthMetres[centre]-2.9f)<.05f,
+                    "Sensor detects roof-layer geometry at the expected metric depth: "+baseline.DepthMetres[centre]);
+                for(int view=0;view<3;view++)
+                {
+                    views.SelectView(view);
+                    var frame=capture.Capture();
+                    Require((sensor.SensorCamera.cullingMask & (1<<roofLayer))!=0 &&
+                        views.roofs.All(r=>r==null || r.enabled) &&
+                        Mathf.Abs(frame.DepthMetres[centre]-baseline.DepthMetres[centre])<.001f,
+                        "Spectator view "+view+" preserves roof visibility and sensor depth.");
+                    Require(Enumerable.Range(0,3).All(channel=>
+                        Mathf.Abs(frame.Rgb[centre*3+channel]-baseline.Rgb[centre*3+channel])<=3),
+                        "Spectator view "+view+" preserves the stationary RGB roof measurement.");
+                    bool spectatorSeesRoof=(Camera.main.cullingMask & (1<<roofLayer))!=0;
+                    Require(spectatorSeesRoof==(view==1),"Only spectator cutaway views exclude the roof layer.");
+                }
+            }
+        }
+        finally
+        {
+            sensor.transform.localPosition=originalPosition;
+            sensor.transform.localRotation=originalRotation;
+            UnityEngine.Object.DestroyImmediate(probe);
+        }
     }
     static void Send(DroneCommandSubscriber command,Vector3 p)
     { command.SendMessage("ReceivePosition",new PointMsg(p.x,p.z,p.y)); }

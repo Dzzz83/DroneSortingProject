@@ -99,7 +99,7 @@ public static class TwoWarehouseCourseBuilder
         foreach(var leg in drone.GetComponentsInChildren<MeshRenderer>().Where(r=>r.name == "Landing leg"))
             leg.gameObject.AddComponent<BoxCollider>();
         var course = drone.gameObject.AddComponent<WarehouseCourse>();
-        drone.gameObject.AddComponent<HardcodedWarehouseFlight>();
+        drone.gameObject.AddComponent<HardcodedWarehouseFlight>().enabled = false;
         course.drone = drone; course.package = package; course.deliveryVolume = volume;
         course.packageSupports = UnityEngine.Object.FindObjectsByType<Collider>().Where(c=>c.name == "Bldg_Floor_001" || c.gameObject == pickup || c.gameObject == delivery || c.name == "Yard asphalt").ToArray();
         foreach(var camera in UnityEngine.Object.FindObjectsByType<CinemachineCamera>()) camera.enabled = false;
@@ -111,7 +111,7 @@ public static class TwoWarehouseCourseBuilder
         views.yardPosition = new Vector3(78,39,58); views.yardTarget = new Vector3(34,0,88);
         views.roofs = new[]{warehouseA,warehouseB}.SelectMany(w=>w.GetComponentsInChildren<MeshRenderer>()).Where(r=>r.bounds.min.y > 6).Cast<Renderer>().ToArray();
         main.transform.SetPositionAndRotation(views.yardPosition,Quaternion.LookRotation(views.yardTarget-views.yardPosition));
-        foreach(var roof in views.roofs) roof.enabled=false;
+        views.ConfigureRoofs();
         Marker("DroneStart",drone.transform.position); Marker("PickupPoint",package.transform.position);
         Marker("WarehouseAExit",new Vector3(34,3,67.1f)); Marker("WarehouseBEntrance",new Vector3(34,3,107.4f));
         Marker("DeliveryPoint",new Vector3(34,.45f,119.5f));
@@ -131,7 +131,7 @@ public static class TwoWarehouseCourseBuilder
         var scene = EditorSceneManager.OpenScene(ScenePath);
         var course = UnityEngine.Object.FindAnyObjectByType<WarehouseCourse>();
         if (course.GetComponent<HardcodedWarehouseFlight>() == null)
-            course.gameObject.AddComponent<HardcodedWarehouseFlight>();
+            course.gameObject.AddComponent<HardcodedWarehouseFlight>().enabled = false;
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("HARDCODED_FLIGHT_INSTALLED");

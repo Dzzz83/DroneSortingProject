@@ -13,7 +13,18 @@ public static class DemoLauncher
     // Opening a scene alone does not mean background indexing/shaders are done.
     public static void Prepare()
     {
-        OpenMainWarehouse();
+        string[] arguments = Environment.GetCommandLineArgs();
+        int sceneArgument = Array.IndexOf(arguments, "-demoScene");
+        string scene = "MainWarehouse";
+        if (sceneArgument >= 0)
+        {
+            if (sceneArgument + 1 >= arguments.Length)
+                throw new ArgumentException("-demoScene requires a scene name.");
+            scene = arguments[sceneArgument + 1];
+        }
+        if (scene != "MainWarehouse" && scene != "TwoWarehouseDelivery")
+            throw new ArgumentException("-demoScene must be MainWarehouse or TwoWarehouseDelivery.");
+        OpenWarehouse("Assets/Scenes/" + scene + ".unity");
         // Fresh editor layouts can lack a Game tab. Make the simulation view
         // available without resetting the user's other windows.
         if (!EditorApplication.ExecuteMenuItem("Window/General/Game"))
@@ -59,7 +70,12 @@ public static class DemoLauncher
 
     public static void OpenMainWarehouse()
     {
-        OpenScene(WarehouseScenePath);
+        OpenWarehouse(WarehouseScenePath);
+    }
+
+    private static void OpenWarehouse(string scenePath)
+    {
+        OpenScene(scenePath);
         foreach (GameObject root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
         {
             foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
@@ -74,6 +90,12 @@ public static class DemoLauncher
             throw new InvalidOperationException("Warehouse drone package references are incomplete.");
         if (Resources.Load<Shader>("DroneMetricDepth") == null)
             throw new InvalidOperationException("Warehouse metric-depth shader is missing.");
+        if (scenePath == TwoWarehouseCourseBuilder.ScenePath)
+        {
+            var flight = handling.GetComponent<HardcodedWarehouseFlight>();
+            if (flight != null && flight.enabled)
+                throw new InvalidOperationException("Disable HardcodedWarehouseFlight before starting the ROS course.");
+        }
         Debug.Log("WAREHOUSE_SCENE_VERIFIED: scripts, package references and depth shader are present.");
     }
 

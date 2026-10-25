@@ -9,6 +9,14 @@ DETECTOR_DEVICE="${DETECTOR_DEVICE:-cpu}"
 ROS_CONTAINER="${ROS_CONTAINER:-ros-noetic}"
 ROS_RUNNER=(bash)
 
+configure_demo_profile() {
+    case "${DEMO_PROFILE:-warehouse}" in
+        warehouse) DEMO_SCENE=MainWarehouse; DEMO_CONFIG="$PROJECT_ROOT/ROS1/package/config/demo.yaml" ;;
+        course) DEMO_SCENE=TwoWarehouseDelivery; DEMO_CONFIG="$PROJECT_ROOT/ROS1/package/config/course.yaml" ;;
+        *) fail 'DEMO_PROFILE must be warehouse or course.' ;;
+    esac
+}
+
 select_ros_environment() {
     case "${ROS_ENVIRONMENT:-auto}" in
         auto|native|distrobox) ;;
