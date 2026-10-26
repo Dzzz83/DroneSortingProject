@@ -63,6 +63,8 @@ class DepthMappingNode:
             raise ValueError("Camera heading requires finite nonzero ROS X/Y")
         length = math.hypot(*heading)
         self.heading = Vector3(heading[0]/length,heading[1]/length,0)
+        self.default_heading = self.heading
+        self.scan_heading_received = None
         self.map = LocalDepthMap(settings)
         self.lock = threading.RLock()
         self.pending = None
@@ -91,6 +93,7 @@ class DepthMappingNode:
         self.plan_path_publisher = rospy.Publisher(topics.LOCAL_PLAN_PATH, Path, queue_size=1)
         self.plan_status_publisher = rospy.Publisher(topics.LOCAL_PLAN_STATUS, String, queue_size=1)
         self.goal_subscriber = rospy.Subscriber(topics.LOCAL_PLAN_GOAL, Point, self.receive_goal, queue_size=1)
+        self.scan_subscriber = rospy.Subscriber(topics.LOCAL_PLAN_SCAN_HEADING, Vector3, self.receive_scan_heading, queue_size=1)
         self.range_subscriber = rospy.Subscriber(topics.FORWARD_RANGE_MAX, Float32, self.receive_range, queue_size=1)
         self.reset_subscriber = rospy.Subscriber(topics.COURSE_OBSERVATIONS, String, self.receive_course, queue_size=1)
         streams = [(topics.FORWARD_DEPTH_IMAGE,Image), (topics.FORWARD_CAMERA_INFO,CameraInfo),
@@ -108,8 +111,23 @@ class DepthMappingNode:
         with self.lock:
             if self.stopping:
                 return
+            if self.scan_heading_received is not None and rospy.get_time()-self.scan_heading_received > 1.0:
+                self.heading = self.default_heading
+                self.scan_heading_received = None
             self.heading_publisher.publish(self.heading)
             self.enabled_publisher.publish(Bool(True))
+
+    def receive_scan_heading(self, message):
+        values = (message.x, message.y)
+        if not all(math.isfinite(value) for value in values):
+            return
+        magnitude = math.hypot(*values)
+        if magnitude < 1e-6:
+            return
+        with self.lock:
+            self.heading = Vector3(values[0]/magnitude, values[1]/magnitude, 0)
+            self.scan_heading_received = rospy.get_time()
+            self.heading_publisher.publish(self.heading)
 
     def receive_range(self, message):
         with self.lock:
@@ -229,7 +247,8 @@ class DepthMappingNode:
         self.plan_path_publisher.publish(route)
         details = {"stamp":now, "frame_id":"warehouse", "state":state,
                    "reason":reason, "waypoints":len(route.poses),
-                   "expanded":expanded, "reset_sequence":self.reset_sequence}
+                   "expanded":expanded, "reset_sequence":self.reset_sequence,
+                   "observation_stamp":self.last_stamp, "goal":self.local_goal}
         self.plan_status_publisher.publish(String(json.dumps(details,allow_nan=False)))
 
     def run(self):

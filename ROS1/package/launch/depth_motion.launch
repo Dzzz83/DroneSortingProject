@@ -1,0 +1,13 @@
+<launch>
+    <!-- One-obstacle manual test only: one depth controller, no mission or detector. -->
+    <include file="$(find drone_sorting)/launch/depth_mapping.launch" />
+    <node pkg="drone_sorting" type="motion_controller.py" name="motion_controller" output="screen" required="true">
+        <param name="avoidance_mode" value="depth" />
+        <param name="enable_dynamic_speed" value="false" />
+        <param name="speed" value="0.2" />
+        <param name="maximum_command_lead" value="0.25" />
+        <param name="position_timeout" value="0.5" />
+        <param name="target_timeout" value="0.5" />
+        <param name="depth_goal_lookahead" value="3.0" />
+    </node>
+</launch>

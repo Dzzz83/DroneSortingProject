@@ -40,6 +40,18 @@ class MotionController:
             "~enable_obstacle_avoidance",
             True,
         )
+        mode = rospy.get_param("~avoidance_mode", None)
+        # Preserve historical behavior unless a mode is explicitly selected.
+        if mode is None:
+            mode = "heuristic" if self.enable_obstacle_avoidance else "none"
+        if mode not in ("none", "heuristic", "depth"):
+            raise ValueError("avoidance_mode must be none, heuristic or depth")
+        self.avoidance_mode = mode
+        if mode == "depth" and (self.position_timeout <= 0 or self.target_timeout <= 0
+                or (self.enable_dynamic_speed and self.speed_timeout <= 0)):
+            raise ValueError("Depth mode requires nonzero position, target and active speed timeouts")
+        self.depth_navigation = None
+        self.depth_reset_seen = None
 
         self.current_position = None
         self.target_position = None
@@ -90,11 +102,11 @@ class MotionController:
         )
         if self.enable_dynamic_speed:
             rospy.Subscriber(ros_topics.COMMAND_SPEED, Float32, self._speed_callback)
+        if self.avoidance_mode == "depth":
+            from drone_sorting.control.depth_navigation import DepthNavigation
+            self.depth_navigation = DepthNavigation()
 
-        rospy.loginfo(
-            "Motion Controller started (obstacle avoidance: %s)",
-            ("ENABLED" if self.enable_obstacle_avoidance else "DISABLED"),
-        )
+        rospy.loginfo("Motion Controller started (avoidance mode: %s)", self.avoidance_mode)
 
     def run(self):
         rate = rospy.Rate(self.update_rate)
@@ -244,6 +256,17 @@ class MotionController:
         return lead <= self.maximum_command_lead + 1e-9
 
     def _update_command(self):
+        # Physical trial reset invalidates every old path and command.
+        if self.depth_navigation is not None:
+            sequence = self.depth_navigation.reset_sequence
+            if sequence is not None and sequence != self.depth_reset_seen:
+                if self.depth_reset_seen is not None:
+                    self.command_position = None
+                    self.current_position = None
+                    self.position_received = None
+                    self.target_position = None
+                    self.target_received = None
+                self.depth_reset_seen = sequence
         if self.command_position is None or self.target_position is None:
             return
 
@@ -262,6 +285,10 @@ class MotionController:
             self._log_status("WAIT_FOR_FEEDBACK")
             return
 
+        if self.avoidance_mode == "depth":
+            self._update_depth_command(now)
+            return
+
         dx = self.target_position.x - self.command_position.x
         dy = self.target_position.y - self.command_position.y
         dz = self.target_position.z - self.command_position.z
@@ -278,7 +305,7 @@ class MotionController:
             p in self.current_phase for p in ("DESCEND", "LIFT", "WAIT", "APPROACH", "REFINE", "LOWER")
         )
 
-        if self.enable_obstacle_avoidance and not is_vertical_phase:
+        if self.avoidance_mode == "heuristic" and not is_vertical_phase:
             decision = self._choose_avoidance_action()
         else:
             decision = "FORWARD"
@@ -309,6 +336,26 @@ class MotionController:
 
         self._publish_commands(self.command_position)
         self._log_status(decision)
+
+    def _update_depth_command(self, now):
+        """Advance only along a fresh, epoch-matched approved path."""
+        command = self.command_position
+        observed = self.current_position
+        target = self.target_position
+        result = self.depth_navigation.tick(
+            (command.x, command.y, command.z),
+            (observed.x, observed.y, observed.z),
+            (target.x, target.y, target.z), now, self.speed/self.update_rate)
+        if result.state != "MOVE":
+            self._log_status("DEPTH_HOLD: " + result.reason)
+            return  # Unity maintains its last applied kinematic position.
+        approved = Point(*result.next_position)
+        if not self._within_feedback_limit(approved):
+            self._log_status("WAIT_FOR_FEEDBACK")
+            return
+        self.command_position = approved
+        self._publish_commands(approved)
+        self._log_status("DEPTH_APPROVED")
 
     def _movement_direction(self, decision, target_direction):
         if decision == "FORWARD":

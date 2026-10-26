@@ -391,6 +391,13 @@ The separate position subscriber received no samples, so that run did not verify
 zero drift. Nineteen focused map/adapter tests and the catkin build passed.
 Movement, bypass planning and full-course mapping remain unverified.
 
+## Depth movement prototype
+
+Milestone 2 adds an **opt-in** depth-only controller experiment. The default
+heuristic stays unchanged. Before moving, measure and configure the full
+drone envelope and read [depth-motion instructions](docs/depth-motion.md).
+No live collision-free autonomous bypass has been verified.
+
 ## Current Status
 
 The original warehouse demo and a two-warehouse course profile share one motion
