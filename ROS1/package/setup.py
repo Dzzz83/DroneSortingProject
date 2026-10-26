@@ -11,6 +11,7 @@ setup_args = generate_distutils_setup(
         "drone_sorting.interfaces",
         "drone_sorting.perception",
         "drone_sorting.mapping",
+        "drone_sorting.navigation",
     ],
     package_dir={"": "python"},
 )

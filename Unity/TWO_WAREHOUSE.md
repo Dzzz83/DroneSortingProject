@@ -10,7 +10,10 @@ movement, pickup/drop commands, navigation, mission state and comparison metrics
 Use `bash ROS1/scripts/run_demo.sh --course` from the repository root to select this
 scene and `ROS1/package/config/course.yaml` together. Wait for `[READY]`, then press
 Play. The original command still selects MainWarehouse and demo.yaml. Autonomous
-avoidance on the new course remains unvalidated.
+avoidance while carrying remains unvalidated. Two navigation-only A-to-B runs
+completed without reported contacts. The navigation-only workflow
+(no pickup, dropoff or YOLO) uses `bash ROS1/scripts/run_navigation.sh`; see the
+[README navigation section](../README.md#navigation-only-a-to-b-demo).
 
 ## Hardcoded flight demo
 
@@ -44,15 +47,19 @@ an interior passage in each warehouse. Each new visible wall has matching
 collision geometry; original retained structure uses mesh colliders.
 
 In the focused Game view: **1** shows the overall cutaway, **2** follows the drone,
-and **3** shows the loading yard. Cutaway views exclude the `CourseRoof` layer only
-from the spectator camera. Roof renderers stay enabled for RGB-depth sensors and
+and **3** shows the loading yard. Hold right mouse to look/orbit; WASD moves,
+Q/E lowers/raises, and Shift moves faster. In follow view these controls adjust
+the offset while continuing to track the drone; in overview/yard they enter free
+flight and leave the view in place on release. **F** restores default follow.
+Release right mouse or press Esc to release the cursor. Cutaway views exclude the
+`CourseRoof` layer only from the spectator camera. Roof renderers stay enabled for RGB-depth sensors and
 their colliders remain active. The HUD reports attachment, settled delivery and
 whether any obstacle contact has occurred since reset. Its reset button restores
 the saved drone/package poses and cancels pending gripper actions.
 
 | Marker | Unity (X, height, Z), metres | ROS (X, Y, height), metres |
 | --- | --- | --- |
-| DroneStart | (34, 2, 50) | (34, 50, 2) |
+| DroneStart | (34, 3, 50) | (34, 50, 3) |
 | PickupPoint, package centre | (34, 0.45, 55) | (34, 55, 0.45) |
 | WarehouseAExit | (34, 3, 67.1) | (34, 67.1, 3) |
 | WarehouseBEntrance | (34, 3, 107.4) | (34, 107.4, 3) |

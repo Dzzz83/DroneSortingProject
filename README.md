@@ -7,7 +7,9 @@ simulation, sensors, package physics, and rendering.**
 This branch also includes a ROS-controlled two-warehouse course. See the
 [Unity branch handoff](Unity/BRANCH_HANDOFF.md) for completed work, changed files,
 test evidence, limitations and how to run it. The ROS instructions below use the
-original `MainWarehouse` demo unless `--course` is selected.
+original `MainWarehouse` delivery demo unless `--course` is selected. For the
+current **A → obstacle course → B navigation-only goal**, use the
+[navigation command](#navigation-only-a-to-b-demo).
 
 ## Run the demo
 
@@ -18,7 +20,8 @@ from the **repository root**: the folder containing `README.md`, `ROS1/` and `Un
 | --- | --- |
 | First setup or dependencies changed | `bash ROS1/scripts/setup_demo.sh` |
 | Every run or restart | `bash ROS1/scripts/run_demo.sh` |
-| Two-warehouse course | `bash ROS1/scripts/run_demo.sh --course` |
+| Two-warehouse delivery course | `bash ROS1/scripts/run_demo.sh --course` |
+| A-to-B navigation, no package handling | `bash ROS1/scripts/run_navigation.sh` |
 
 ### First-time setup
 
@@ -76,13 +79,13 @@ disables `HardcodedWarehouseFlight`; keep it disabled for ROS operation.
 The course profile observes the package near ROS `(34, 55)`, delivers to
 `(34, 119.5)`, and uses a 3 m drone-root cruising height for the 4.5 m entrances.
 Its pickup bounds, release height and travel timeout match the new layout.
-Changing these settings does not create a safe route. Autonomous avoidance on
-this course still requires validation. The original command and `demo.yaml`
-retain their existing behavior. See [course coordinates and controls](Unity/TWO_WAREHOUSE.md).
+Changing these settings does not create a safe route for the package workflow.
+The separate navigation-only command has completed the static course; the
+original command and `demo.yaml` retain their existing behavior. See [course coordinates and controls](Unity/TWO_WAREHOUSE.md).
 
 A live ROS-TCP smoke test completed pickup, a known bypass and settled delivery
 inside B with no reported contacts. This checks transport and package mechanics;
-the full detector-guided mission and autonomous avoidance remain unvalidated.
+the full detector-guided delivery with autonomous avoidance remains unvalidated.
 [Verification details](Unity/Verification/ros-control-fixes.md).
 
 ## Installation
@@ -236,6 +239,8 @@ following generated workspace symlinks back into the package.
 | `perception/camera_validation.py`, `camera_geometry.py` | Validate camera data and convert image/depth coordinates |
 | `perception/package_localization.py`, `package_grasp.py` | Locate packages in the warehouse and estimate grasp readiness |
 | `mapping/depth_map.py` | Local map: occupied, free-ray evidence and unknown space |
+| `mapping/local_goals.py`, `mapping/clearance.py` | Reachable observed-space goals and full-envelope clearance queries |
+| `navigation/demo.py`, `nodes/navigation_demo.py` | Navigation-only destination, physical arrival and failure coordination |
 | `mapping/live_mapping.py`, `nodes/depth_mapping.py` | Synchronize forward observations, update the map and publish map/status topics |
 | `interfaces/ros_topics.py` | ROS topic names; keep aligned with Unity's `DroneRosTopics.cs` |
 
@@ -246,7 +251,7 @@ following generated workspace symlinks back into the package.
 | `ROS/DroneCommandSubscriber.cs`, `DroneStatePublisher.cs` | Apply ROS movement commands and report position |
 | `ROS/DroneObstacleSensorPublisher.cs` | Seven distances: front, upper-front, lower-front, left, right, up, down; `-1` means clear within range |
 | `Sensors/DroneRgbCamera.cs` | Drone sensor mount and lens |
-| `Sensors/ForwardObstacleCamera.cs` | Opt-in forward RGB/depth camera with independent ROS-controlled heading |
+| `Sensors/ForwardObstacleCamera.cs`, `PhysicsObstacleDepth.cs` | Opt-in forward RGB and sparse physics-depth sensor with ROS-controlled heading |
 | `Sensors/RgbDepthCapture.cs`, `RgbDepthFrame.cs` | Capture synchronized RGB/metric depth and hold frame data |
 | `ROS/DroneCameraPublisher.cs`, `DroneCameraMessages.cs` | Publish image, calibration, poses and transforms |
 | `ROS/PackageActionBridge.cs`, `DroneRosTopics.cs` | Translate ROS package actions/confirmations; shared topic names |
@@ -282,7 +287,7 @@ flowchart LR
 | `/drone/current_pose`, `/tf`, `/drone/package_candidates` | Drone pose, transforms and perception JSON |
 | `/drone/forward_camera/{rgb/image_raw,depth/image_raw,camera_info,pose,drone_pose}` | `Image` RGB8/32FC1 depth, `CameraInfo` calibration and `PoseStamped` camera/drone poses sharing a capture timestamp |
 | `/drone/forward_camera/range_max` | `Float32`: maximum optical-axis depth, 15 m |
-| `/drone/avoidance/{camera_enabled,camera_heading}` | `Bool` enable request and `Vector3` heading in ROS warehouse axes; only horizontal X/Y are used |
+| `/drone/avoidance/{camera_enabled,camera_heading}` | `Bool` enable request and `Vector3` heading in ROS warehouse axes; XYZ supports six-direction sensing |
 | `/drone/local_map/{occupied,free}` | Separate `sensor_msgs/PointCloud2` voxel centres in ROS `warehouse`; unknown cells are absent |
 | `/drone/local_map/status` | `String` JSON: observation age, processing time, cell counts, reset sequence and wait/rejection reason |
 
@@ -309,8 +314,13 @@ The forward camera is separate from the package camera: 320 × 240 RGB/depth at 
 requested 6 Hz, mounted 0.5 m below the drone root. Calibration uses optical axes
 X right, Y down, Z forward; camera/drone poses use ROS `warehouse` coordinates
 (X/Y horizontal, Z up). Depth is optical-axis metres in [0.2, 15]. Positive infinity
-means rendered no-hit within the declared range; NaN means invalid or too near.
-The package camera retains its existing settings and NaN convention.
+means no solid hit within the declared range; NaN means unsampled, invalid or too
+near. Forward depth now measures Unity physics surfaces at every eighth row and
+column, including invisible solid collision proxies; other pixels remain NaN.
+RGB still comes from the renderer. This avoids approving the empty-looking space
+inside conservative forklift collision boxes. Triggers and the drone's own
+colliders are excluded; an attached package remains an occluder. The package
+camera retains its existing rendered depth, settings and NaN convention.
 
 `WarehouseSetup` installs the forward sensor at runtime. It stays idle until a ROS
 consumer requests capture. Consumers should repeat enable/heading requests until
@@ -389,24 +399,99 @@ A stationary live integration check accepted 27 observations with no rejected
 frames, produced occupied/free clouds and emptied both after input stopped.
 The separate position subscriber received no samples, so that run did not verify
 zero drift. Nineteen focused map/adapter tests and the catkin build passed.
-Movement, bypass planning and full-course mapping remain unverified.
+That initial passive check did not verify movement. Subsequent navigation-only
+flight results are recorded below.
 
 ## Depth movement prototype
 
 Milestone 2 adds an **opt-in** depth-only controller experiment. The default
 heuristic stays unchanged. Before moving, measure and configure the full
 drone envelope and read [depth-motion instructions](docs/depth-motion.md).
-No live collision-free autonomous bypass has been verified.
+The navigation-only workflow below has now verified obstacle detours on the saved
+static course. Planner status includes a compact `start_clearance` voxel breakdown
+to diagnose initial HOLDs. Historical yaw-only tests found vertical blind spots;
+the navigation launch now uses six-direction sensing. See the
+[clearance diagnosis](docs/depth-planner.md#diagnosing-initial-clearance).
+The ROS freshness delay has been corrected without increasing freshness limits;
+[timing measurements and verification](docs/depth-motion.md#freshness-timing-and-the-ros-queue-fix)
+record the result. The separate path-following oscillation and final-arrival reset
+were also corrected; [short-flight verification](docs/depth-motion.md#path-continuity-and-arrival-fix)
+covers repeated nearby arrivals and approval-expiry stopping.
+
+## Navigation-only A-to-B demo
+
+Open `Unity/Assets/Scenes/TwoWarehouseDelivery.unity` in Unity, then run:
+
+```bash
+bash ROS1/scripts/run_navigation.sh
+```
+
+You can invoke this script from any directory using its absolute path. Keep the
+terminal open during the run. Use **Ctrl+C** to stop ROS, or Unity's **Reset physical
+trial** button to replay without another terminal command. `--help` shows the
+available launch overrides; for example `speed:=1.5`. The launcher refuses to
+start alongside an existing ROS run, preserving one movement controller.
+
+The command rebuilds the prepared Noetic workspace (native or Distrobox), starts
+one TCP endpoint, depth mapper, shared motion controller and navigation coordinator.
+It leaves the Unity editor open and starts no YOLO detector or package mission.
+Press Play if stopped. The coordinator requests a physical trial reset, then
+requests ROS destination `(34, 119.5, 3)` from the saved A start `(34, 50, 3)`.
+There are no route waypoints or scene obstacle coordinates in the navigator.
+
+Course camera controls (click the Game view first): **1** overview, **2** follow,
+**3** yard, **F** reset default follow. Hold right mouse and use mouse/WASD/Q/E
+to adjust the view; Shift accelerates movement. Follow mode keeps the adjusted
+offset attached to the moving drone. Overview/yard allow free flight and keep the
+view in place after release. Release right mouse or Esc to release the cursor.
+These controls affect only the spectator camera.
+
+The opt-in launch uses six-direction sensing, bounded no-hit range evidence,
+six-second evidence history for the static course, 2.0 m/s requested speed and
+the existing unloaded envelope. Plan/observation freshness limits remain 0.35/0.5 seconds.
+The mapper selects reachable intermediate goals in observed free space, rechecks
+their complete envelope paths and penalises recently completed goals to discourage
+cycling. If no reachable goal is observed it holds and continues sensing.
+
+`/drone/navigation/status` (`std_msgs/String`, JSON) reports `WAITING`, `NAVIGATING`,
+`ARRIVED` or `FAILED`. Arrival requires fresh Unity position within 0.15 m of the
+destination for one second, with no reported contacts. Contacts, 90 seconds without
+0.5 m displacement, 10 seconds of lost feedback during a run, or the 900-second
+mission limit stop target publication and report failure. The shared controller
+also stops on stale targets, stale approval or contact telemetry. Resetting the
+physical trial starts a new run. Ctrl+C stops ROS; Unity holds its last position.
+
+For a short diagnostic run, for example:
+
+```bash
+bash ROS1/scripts/run_navigation.sh 'destination:=[34.0,85.0,3.0]' speed:=0.3
+```
+
+Use `reset_on_start:=false` only to continue from the current physical position.
+Do not run this alongside another mission/controller. Existing delivery commands
+retain their original behavior.
+
+Two complete ROS/Unity runs at the default **2 m/s requested speed** reached B
+with zero final reported position error and no reported contacts, in **152.1 s**
+and **151.4 s**. Earlier 1 m/s runs took approximately 187–206 s and also verified
+stopping and recovery when mapper approvals expired. Clearance, freshness and
+command-lead limits are unchanged. Actual travel includes sensing holds and
+detours, so requested speed is not the average speed. These results cover the saved static course and unloaded drone;
+package delivery with avoidance and dynamic obstacles remain unverified.
+[Detailed verification](docs/depth-motion.md#navigation-only-integration).
 
 ## Current Status
 
-The original warehouse demo and a two-warehouse course profile share one motion
-controller and two public scripts. The course defaults to ROS control; spectator
+The warehouse delivery profiles and navigation-only workflow share one motion
+controller. The course defaults to ROS control; spectator
 cutaways affect only the viewing camera, preserving sensor geometry and colliders.
 General route planning, repeated deliveries and automatic recovery are unfinished.
 This branch includes the forward depth sensor and a live local-map node.
-A conservative fixed-altitude planning prototype is available but is not
-connected to movement. Depth-based movement integration remains unfinished.
+The opt-in navigation-only launch uses six-direction physics-depth observations,
+full-envelope clearance and three-dimensional observed-space goal selection.
+Two complete A-to-B runs passed with different obstacle detours, accurate final
+arrival and no reported contacts. The current goal excludes package detection,
+pickup and dropoff.
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took
 about 110 seconds in each run, within the 120-second limit. Those checks cover the

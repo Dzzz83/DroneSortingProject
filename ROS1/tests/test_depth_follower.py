@@ -27,13 +27,33 @@ class DepthFollowerTests(unittest.TestCase):
         x=self.decide(command=(1,0,1),observed=(0,0,1))
         self.assertEqual(x.next_position,(1,.1,1))
 
+    def test_near_earlier_segment_does_not_hide_exact_later_segment(self):
+        # Recorded replacement route: feedback trails the current command.
+        path = ((34.125, 50.135, 3.125), (34.125, 50.125, 3.125),
+                (34.125, 50.375, 3.125), self.goal)
+        self.follower.receive_path(path, 10.)
+        decision = self.decide(command=(34.125, 50.175, 3.125),
+                               observed=path[0], step=.01)
+        self.assertEqual(decision.state, 'MOVE', decision.reason)
+        self.assertAlmostEqual(decision.next_position[1], 50.185)
+
     def test_no_unapproved_diagonal_join(self):
-        self.assertEqual(self.decide(command=(.25,.1,1)).reason,"command_not_on_approved_path")
+        for offset in (.01, .1):
+            self.assertEqual(self.decide(command=(.25,offset,1)).reason,
+                             "command_not_on_approved_path")
 
     def test_stale_plan_and_stale_sensor_hold(self):
-        self.assertEqual(self.decide(now=10.4).reason,"route_stale")
+        self.assertEqual(self.decide(now=10.4).reason,"route_plan_stale")
         self.follower.status["observation_stamp"]=9
-        self.assertEqual(self.decide().reason,"route_stale")
+        self.assertEqual(self.decide().reason,"route_observation_stale")
+
+    def test_separate_sensor_limit_does_not_extend_plan_expiry(self):
+        self.follower.maximum_observation_age = .5
+        self.follower.status['observation_stamp'] = 9.7
+        self.assertEqual(self.decide(now=10.1).state, 'MOVE')
+        self.assertEqual(self.decide(now=10.21).reason, 'route_observation_stale')
+        self.follower.status['observation_stamp'] = 10.
+        self.assertEqual(self.decide(now=10.4).reason, 'route_plan_stale')
 
     def test_old_epoch_mismatched_goal_and_stamp_hold(self):
         self.assertEqual(self.decide(seq=6).reason,"route_epoch_mismatch")

@@ -1,0 +1,30 @@
+<launch>
+    <!-- Navigation only. ROS warehouse X/Y horizontal, Z up. -->
+    <arg name="destination" default="[34.0, 119.5, 3.0]" />
+    <arg name="speed" default="2.0" />
+    <arg name="reset_on_start" default="true" />
+    <arg name="timeout" default="900.0" />
+    <include file="$(find drone_sorting)/launch/depth_mapping.launch">
+        <arg name="volume_scan" value="true" />
+        <arg name="allow_vertical" value="true" />
+        <arg name="clear_range_evidence" value="true" />
+        <arg name="select_local_goals" value="true" />
+        <arg name="update_rate" value="8.0" />
+        <arg name="evidence_lifetime" value="6.0" />
+    </include>
+    <node pkg="drone_sorting" type="motion_controller.py" name="motion_controller" output="screen" required="true">
+        <param name="avoidance_mode" value="depth" />
+        <param name="enable_dynamic_speed" value="false" />
+        <param name="speed" value="$(arg speed)" />
+        <param name="position_timeout" value="0.5" />
+        <param name="target_timeout" value="0.5" />
+        <param name="maximum_command_lead" value="0.25" />
+        <param name="depth_allow_vertical" value="true" />
+        <param name="depth_autonomous_goals" value="true" />
+    </node>
+    <node pkg="drone_sorting" type="navigation_demo.py" name="navigation_demo" output="screen" required="true">
+        <rosparam param="destination" subst_value="true">$(arg destination)</rosparam>
+        <param name="reset_on_start" value="$(arg reset_on_start)" />
+        <param name="timeout" value="$(arg timeout)" />
+    </node>
+</launch>

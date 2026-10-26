@@ -12,3 +12,4 @@ camera_heading: [0.0, 1.0]
 # Format: [ROS X half-extent, ROS Y half-extent, below root, above root] (metres)
 # planner_envelope: [<measured>, <measured>, <measured>, <measured>]
 planner_max_expansions: 4000
+planner_envelope: [1.55, 1.40, 1.26, 0.772]

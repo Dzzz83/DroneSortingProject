@@ -43,3 +43,7 @@ LOCAL_PLAN_PATH = "/drone/local_planner/path"
 LOCAL_PLAN_STATUS = "/drone/local_planner/status"
 LOCAL_PLAN_SCAN_HEADING = "/drone/local_planner/scan_heading"
 COURSE_OBSERVATIONS = "/drone/course/observations"
+
+COURSE_RESET = "/drone/course/reset"
+# ROS-only navigation coordinator status; Unity does not consume it.
+NAVIGATION_STATUS = "/drone/navigation/status"

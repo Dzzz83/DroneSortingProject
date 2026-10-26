@@ -51,6 +51,95 @@ public static class TwoWarehouseCourseVerification
         }
     }
 
+    [MenuItem("Drone Delivery/Verify Course Spectator Controls")]
+    public static void VerifyCourseSpectatorControls()
+    {
+        var cameraObject = new GameObject("Course spectator fixture");
+        var target = new GameObject("Spectator target fixture");
+        try
+        {
+            cameraObject.AddComponent<Camera>();
+            var views = cameraObject.AddComponent<WarehouseCourseViews>();
+            // Also supports running this fixture with Play stopped.
+            views.InitializeCamera();
+            views.drone = target.transform;
+            target.transform.position = new Vector3(-100,10,-100);
+            views.overviewPosition = new Vector3(-90,20,-110);
+            views.overviewTarget = target.transform.position;
+            views.yardPosition = new Vector3(-80,15,-100);
+            views.yardTarget = target.transform.position;
+            views.SelectView(1);
+            Vector3 originalOffset = cameraObject.transform.position-target.transform.position;
+            views.AdjustView(new Vector2(10,5),new Vector3(1,1,1),false,.1f);
+            views.RefreshView();
+            Vector3 customOffset = cameraObject.transform.position-target.transform.position;
+            Require((customOffset-originalOffset).magnitude>.1f,"Manual follow controls change the spectator offset.");
+            Vector3 displacement = new Vector3(2,1,80);
+            target.transform.position += displacement;
+            views.RefreshView();
+            Require((cameraObject.transform.position-target.transform.position-customOffset).magnitude<.001f,
+                "Adjusted follow offset persists while the drone moves beyond the original warehouse.");
+            Require(Vector3.Dot(cameraObject.transform.forward,
+                    (target.transform.position-cameraObject.transform.position).normalized)>.999f,
+                "Adjusted follow view keeps looking at the drone.");
+            views.SelectView(1);
+            Require((cameraObject.transform.position-target.transform.position-originalOffset).magnitude<.001f,
+                "Selecting follow resets its default offset.");
+            views.SelectView(0);
+            views.AdjustView(new Vector2(10,5),Vector3.forward,true,.1f);
+            Vector3 freePosition = cameraObject.transform.position;
+            Quaternion freeRotation = cameraObject.transform.rotation;
+            target.transform.position += displacement;
+            views.RefreshView();
+            Require(cameraObject.transform.position==freePosition && cameraObject.transform.rotation==freeRotation,
+                "Free camera stays where the user placed it.");
+            views.SelectView(2);
+            Require(cameraObject.transform.position==views.yardPosition,"Yard preset restores its fixed view.");
+            Debug.Log("COURSE_SPECTATOR_CHECKS_PASS");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(cameraObject);
+            UnityEngine.Object.DestroyImmediate(target);
+        }
+    }
+
+    [MenuItem("Drone Delivery/Verify Obstacle Depth")]
+    public static void VerifyObstacleDepth()
+    {
+        var root = new GameObject("Depth fixture drone");
+        var cameraObject = new GameObject("Depth fixture camera");
+        var obstacle = new GameObject("Invisible solid depth fixture");
+        try
+        {
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.enabled = false; camera.fieldOfView = 90; camera.aspect = 1;
+            camera.transform.position = new Vector3(-100,100,-100);
+            camera.transform.rotation = Quaternion.identity;
+            obstacle.transform.position = camera.transform.position + Vector3.forward*3;
+            var box = obstacle.AddComponent<BoxCollider>(); box.size = new Vector3(5,5,.1f);
+            Physics.SyncTransforms();
+            var frame = new RgbDepthFrame(17,17,new byte[17*17*3],new float[17*17],
+                0,camera.transform.position,camera.transform.rotation);
+            PhysicsObstacleDepth.Measure(frame,camera,root.transform);
+            Require(Mathf.Abs(frame.DepthMetres[8*17+8]-2.95f)<.001f,
+                "Depth measures a collision-only surface at calibrated optical distance.");
+            Require(float.IsNaN(frame.DepthMetres[1]),"Unsampled depth pixels remain unknown.");
+            box.isTrigger = true;
+            Physics.SyncTransforms();
+            PhysicsObstacleDepth.Measure(frame,camera,root.transform);
+            Require(float.IsPositiveInfinity(frame.DepthMetres[8*17+8]),
+                "Triggers do not supply solid obstacle returns.");
+            Debug.Log("OBSTACLE_DEPTH_CHECKS_PASS");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(obstacle);
+            UnityEngine.Object.DestroyImmediate(cameraObject);
+            UnityEngine.Object.DestroyImmediate(root);
+        }
+    }
+
     [MenuItem("Drone Delivery/Verify Hardcoded A to B Flight")]
     public static void BeginFlight()
     {

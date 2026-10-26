@@ -3,11 +3,23 @@
     <arg name="config" default="$(find drone_sorting)/config/depth_mapping.yaml" />
     <arg name="tcp_ip" default="0.0.0.0" />
     <arg name="tcp_port" default="10000" />
+    <arg name="select_local_goals" default="false" />
+    <arg name="volume_scan" default="false" />
+    <arg name="allow_vertical" default="false" />
+    <arg name="clear_range_evidence" default="false" />
+    <arg name="update_rate" default="4.0" />
+    <arg name="evidence_lifetime" default="2.0" />
     <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
         <arg name="tcp_ip" value="$(arg tcp_ip)" />
         <arg name="tcp_port" value="$(arg tcp_port)" />
     </include>
     <node pkg="drone_sorting" type="depth_mapping.py" name="depth_mapping" output="screen" required="true">
         <rosparam command="load" file="$(arg config)" />
+        <param name="select_local_goals" value="$(arg select_local_goals)" />
+        <param name="volume_scan" value="$(arg volume_scan)" />
+        <param name="planner_allow_vertical" value="$(arg allow_vertical)" />
+        <param name="clear_range_evidence" value="$(arg clear_range_evidence)" />
+        <param name="update_rate" value="$(arg update_rate)" />
+        <param name="maximum_age" value="$(arg evidence_lifetime)" />
     </node>
 </launch>

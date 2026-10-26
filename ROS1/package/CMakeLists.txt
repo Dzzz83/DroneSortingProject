@@ -28,6 +28,7 @@ catkin_package(
 # ROS executable nodes
 catkin_install_python(
   PROGRAMS
+    nodes/navigation_demo.py
     nodes/depth_mapping.py
     nodes/motion_controller.py
     nodes/perception.py

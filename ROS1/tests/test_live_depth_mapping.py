@@ -2,6 +2,7 @@
 import json
 import math
 import struct
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -81,6 +82,47 @@ class LiveMappingTests(unittest.TestCase):
         self.assertEqual(self.status()['superseded'],1)
         self.assertEqual(self.status()['accepted'],1)
 
+    def test_camera_callback_does_not_wait_for_the_map_worker_lock(self):
+        received = threading.Event()
+        messages = self.messages()
+        def receive():
+            self.node.receive_bundle(*messages)
+            received.set()
+        worker = threading.Thread(target=receive)
+        try:
+            with self.node.lock:
+                worker.start()
+                self.assertTrue(received.wait(.5), 'Camera receipt waited for mapping/planning')
+                self.assertIs(self.node.pending[0], messages[0])
+        finally:
+            worker.join(timeout=1)
+
+    def test_live_clock_is_checked_again_after_slow_integration(self):
+        integrate = self.node.map.integrate
+        def slow_integration(observation, now):
+            integrate(observation, now)
+            self.now = 103.
+        self.node.receive_bundle(*self.messages())
+        with patch.object(self.node.map, 'integrate', side_effect=slow_integration):
+            self.node.process_once()
+        self.assertEqual(self.node.last_stamp, 100.)
+        self.assertEqual(self.status()['stamp'], 103.)
+        self.assertEqual(self.status()['reason'], 'stale_observation')
+        self.assertEqual(self.status()['free_cells'], 0)
+        plan_status = json.loads(self.publishers[topics.LOCAL_PLAN_STATUS].publish.call_args[0][0].data)
+        self.assertEqual(plan_status['stamp'], 103.)
+        self.assertEqual(plan_status['observation_stamp'], 100.)
+
+    def test_volume_scan_advances_only_after_the_requested_view_arrives(self):
+        self.node.volume_scan = True
+        self.accept(100)
+        self.assertEqual(self.node.scan_index, 1)
+        heading = self.publishers[topics.FORWARD_CAMERA_HEADING].publish.call_args[0][0]
+        self.assertEqual((heading.x, heading.y, heading.z), (1, 0, 0))
+        self.now = 100.1
+        self.accept(100.1)  # Still looking +Y, not the requested +X.
+        self.assertEqual(self.node.scan_index, 1)
+
     def test_malformed_observations_do_not_refresh_accepted_age(self):
         for issue in ('layout','calibration','pose','stamp','optical_frame','root_rotation'):
             with self.subTest(issue=issue):
@@ -135,6 +177,29 @@ class LiveMappingTests(unittest.TestCase):
         self.node.receive_bundle(*messages)
         self.node.process_once(101)
         self.assertEqual(self.node.map.state_at(old_point,101),'unknown')
+
+    def test_volume_scan_keeps_unexpired_views_across_a_short_transport_gap(self):
+        self.node.volume_scan = True
+        self.accept()
+        self.now = 100.7
+        messages = self.messages(100.7)
+        messages[2].pose.orientation.x = 0
+        messages[2].pose.orientation.w = 1
+        self.node.receive_bundle(*messages)
+        self.node.process_once(self.now)
+        self.assertEqual(self.node.map.state_at((34,53,2.5),self.now), 'occupied')
+
+    def test_capture_sequence_restart_discards_previous_session_views(self):
+        self.node.volume_scan = True
+        self.accept()
+        self.now = 100.1
+        messages = self.messages(100.1)
+        messages[0].header.seq = 0
+        messages[2].pose.orientation.x = 0
+        messages[2].pose.orientation.w = 1
+        self.node.receive_bundle(*messages)
+        self.node.process_once(self.now)
+        self.assertEqual(self.node.map.state_at((34,53,2.5),self.now), 'unknown')
 
     def test_range_declaration_and_acquisition_age_are_required(self):
         self.node.receive_range(Float32(10))

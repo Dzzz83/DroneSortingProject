@@ -91,7 +91,9 @@ public static class TwoWarehouseCourseBuilder
         var destination = new GameObject("Delivery observation volume B");
         destination.transform.position = new Vector3(34,.9f,119.5f);
         var volume = destination.AddComponent<BoxCollider>(); volume.size = new Vector3(5,1.6f,5); volume.isTrigger = true;
-        drone.transform.SetPositionAndRotation(new Vector3(34,2,50),Quaternion.identity);
+        // Start at cruise height: live depth evidence blocks the clearance
+        // margin near low furniture at the former 2 m staging position.
+        drone.transform.SetPositionAndRotation(new Vector3(34,3,50),Quaternion.identity);
         package.transform.SetPositionAndRotation(new Vector3(34,.45f,55),Quaternion.identity);
         WarehouseSetup.ConfigureDrone(drone.gameObject);
         // Match the collision envelope to the visible rotors, body and gripper.

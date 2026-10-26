@@ -44,17 +44,29 @@ class DepthObservation:
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
     def surface_points(self, stride):
+        points, depths, _hits = self.sampled_rays(stride)
+        return points, depths
+
+    def sampled_rays(self, stride, include_clear_range=False):
+        """Optional +inf is an explicit no-hit measurement over the 15 m range.
+
+        NaN remains missing/invalid. A no-hit ray has no occupied endpoint.
+        The live adapter must verify the sensor's range declaration first.
+        """
         rows, columns = np.mgrid[0:self.depth.shape[0]:stride, 0:self.depth.shape[1]:stride]
         depth = self.depth[::stride, ::stride]
         good = np.isfinite(depth)
-        z = depth[good].astype(float)
+        if include_clear_range:
+            good |= np.isposinf(depth)
+        hits = np.isfinite(depth[good])
+        z = np.where(hits, depth[good], 15.).astype(float)
         k = self.intrinsics
         optical = np.column_stack(((columns[good]-k[2])*z/k[0], (rows[good]-k[5])*z/k[4], z))
         # Reuse the established quaternion convention instead of swapping components.
         axes = [transform_point(axis, (0,0,0), self.quaternion)
                 for axis in ((1,0,0), (0,1,0), (0,0,1))]
         rotation = np.column_stack(axes)
-        return optical @ rotation.T + self.position, z
+        return optical @ rotation.T + self.position, z, hits
 
 
 @dataclass(frozen=True)
@@ -65,6 +77,7 @@ class MapSettings:
     maximum_age: float = 2.
     surface_margin: float = .1
     pixel_stride: int = 8
+    clear_range_evidence: bool = False
 
     def __post_init__(self):
         dimensions = (self.resolution, self.radius, self.vertical_radius, self.maximum_age, self.surface_margin)
@@ -73,6 +86,8 @@ class MapSettings:
         if (not isinstance(self.pixel_stride, int) or self.pixel_stride < 1
                 or min(self.radius, self.vertical_radius) < self.resolution):
             raise ValueError("Invalid map sampling or window")
+        if not isinstance(self.clear_range_evidence, bool):
+            raise ValueError("clear_range_evidence must be boolean")
 
 
 class LocalDepthMap:
@@ -82,12 +97,14 @@ class LocalDepthMap:
         self.cells = {}
         self.bounds = None
         self.last_stamp = None
+        self.last_prune = None
 
     def reset(self):
         """Drop all evidence on a new trial or acquisition-clock reset."""
         self.cells.clear()
         self.bounds = None
         self.last_stamp = None
+        self.last_prune = None
 
     def cell_at(self, point):
         return tuple(math.floor(value/self.settings.resolution) for value in point)
@@ -128,6 +145,45 @@ class LocalDepthMap:
         times = self.cells.setdefault(cell, [-math.inf, -math.inf])
         times[1 if occupied else 0] = stamp
 
+    def _free_ray_cells(self, start, endpoints):
+        """Batch the same DDA traversal as _ray_cells, without per-ray Python loops."""
+        if not len(endpoints):
+            return []
+        resolution = self.settings.resolution
+        direction = endpoints - np.asarray(start)
+        step = np.sign(direction).astype(np.int64)
+        current = np.tile(self.cell_at(start), (len(endpoints), 1))
+        final = np.floor(endpoints/resolution).astype(np.int64)
+        boundary = (current + (step > 0))*resolution
+        with np.errstate(divide='ignore', invalid='ignore'):
+            crossing = np.where(step != 0, (boundary-start)/direction, np.inf)
+            increment = np.where(step != 0, resolution/np.abs(direction), np.inf)
+        active = np.ones(len(endpoints), dtype=bool)
+        lower, upper = np.asarray(self.bounds).T
+        cells = []
+        maximum_steps = 1 + int(np.max(np.abs(current-final).sum(axis=1)))
+        for _ in range(maximum_steps):
+            exit_time = crossing.min(axis=1)
+            inside = np.all((current >= lower) & (current <= upper), axis=1)
+            visible = active & inside & (exit_time > 0)
+            if visible.any():
+                cells.append(current[visible].copy())
+            active &= ~np.all(current == final, axis=1) & (exit_time < 1)
+            if not active.any():
+                break
+            with np.errstate(invalid='ignore'):
+                tied = active[:, None] & (np.abs(crossing-exit_time[:, None]) < 1e-12)
+            current += tied*step
+            crossing = np.where(tied, crossing+increment, crossing)
+        if not cells:
+            return []
+        # A one-dimensional cell key avoids sorting three-column records.
+        shape = upper-lower+1
+        offsets = np.concatenate(cells)-lower
+        keys = np.ravel_multi_index(offsets.T, shape)
+        unique = np.column_stack(np.unravel_index(np.unique(keys), shape))+lower
+        return list(map(tuple, unique.tolist()))
+
     def integrate(self, observation, now):
         s = self.settings
         if not math.isfinite(now) or not 0 <= now-observation.stamp <= s.maximum_age:
@@ -135,19 +191,26 @@ class LocalDepthMap:
         if self.last_stamp is not None and observation.stamp <= self.last_stamp:
             raise ValueError("Acquisitions must increase; receipt time cannot refresh a replay")
         radii = (s.radius, s.radius, s.vertical_radius)
-        self.bounds = tuple((math.floor((value-radius)/s.resolution), math.floor((value+radius)/s.resolution))
-                            for value,radius in zip(observation.drone_position,radii))
-        self.cells = {cell:times for cell,times in self.cells.items()
-                      if self._inside(cell) and 0 <= now-max(times) <= s.maximum_age}
-        points, depths = observation.surface_points(s.pixel_stride)
+        bounds = tuple((math.floor((value-radius)/s.resolution), math.floor((value+radius)/s.resolution))
+                       for value,radius in zip(observation.drone_position,radii))
+        moved_window = bounds != self.bounds
+        self.bounds = bounds
+        # Queries always apply evidence ages. While stationary, pruning storage
+        # need not repeat on every image; a changed window still prunes at once.
+        if moved_window or self.last_prune is None or now-self.last_prune >= .5:
+            self.cells = {cell:times for cell,times in self.cells.items()
+                          if self._inside(cell) and 0 <= now-max(times) <= s.maximum_age}
+            self.last_prune = now
+        points, depths, hits = observation.sampled_rays(s.pixel_stride, s.clear_range_evidence)
         camera = np.asarray(observation.position)
-        for point, optical_depth in zip(points, depths):
-            # Stop short of the uncertain surface. Never clear behind a return.
-            if optical_depth > .2 + s.surface_margin:
-                fraction = (optical_depth-s.surface_margin)/optical_depth
-                endpoint = camera + (point-camera)*fraction
-                for cell in self._ray_cells(camera, endpoint):
-                    self._mark(cell, observation.stamp, occupied=False)
+        valid_free = depths > .2 + s.surface_margin
+        fractions = (depths[valid_free]-s.surface_margin)/depths[valid_free]
+        endpoints = camera + (points[valid_free]-camera)*fractions[:, None]
+        for cell in self._free_ray_cells(camera, endpoints):
+            self._mark(cell, observation.stamp, occupied=False)
+        for point, optical_depth, hit in zip(points, depths, hits):
+            if not hit:
+                continue
             lower = self.cell_at(point-s.surface_margin)
             upper = self.cell_at(point+s.surface_margin)
             for cell in itertools.product(*(range(a,b+1) for a,b in zip(lower,upper))):
@@ -155,7 +218,10 @@ class LocalDepthMap:
         self.last_stamp = observation.stamp
 
     def state_at(self, point, now):
-        times = self.cells.get(self.cell_at(point))
+        return self.cell_state(self.cell_at(point), now)
+
+    def cell_state(self, cell, now):
+        times = self.cells.get(cell)
         if times is None:
             return "unknown"
         free, occupied = times
@@ -168,9 +234,23 @@ class LocalDepthMap:
     def snapshot(self, now):
         records = []
         for cell, (free, occupied) in sorted(self.cells.items()):
-            point = tuple((value+.5)*self.settings.resolution for value in cell)
-            state = self.state_at(point, now)
+            state = self.cell_state(cell, now)
             if state != "unknown":
                 stamp = occupied if state == "occupied" else free
                 records.append((cell, state, now-stamp))
         return records
+
+    def evidence(self, now):
+        """Current cell states for planning, without sorting/visualization records.
+
+        Same independent acquisition ages and occupied priority as snapshot().
+        The mapping worker owns the map while constructing this dictionary.
+        """
+        maximum_age = self.settings.maximum_age
+        states = {}
+        for cell, (free, occupied) in self.cells.items():
+            if 0 <= now-occupied <= maximum_age:
+                states[cell] = "occupied"
+            elif 0 <= now-free <= maximum_age:
+                states[cell] = "free"
+        return states

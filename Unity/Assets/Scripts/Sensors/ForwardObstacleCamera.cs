@@ -7,7 +7,7 @@ using RosMessageTypes.Std;
 using Unity.Robotics.ROSTCPConnector;
 using UnityEngine;
 
-/// <summary>Opt-in forward RGB-depth sensor with a ROS-controlled yaw gimbal.</summary>
+/// <summary>Opt-in RGB-depth sensor with a ROS-controlled viewing direction.</summary>
 [DisallowMultipleComponent]
 public sealed class ForwardObstacleCamera : MonoBehaviour
 {
@@ -41,9 +41,15 @@ public sealed class ForwardObstacleCamera : MonoBehaviour
 
     void ReceiveHeading(Vector3Msg message)
     {
-        var direction = new Vector3((float)message.x, 0f, (float)message.y);
-        if (float.IsFinite(direction.x) && float.IsFinite(direction.z) && direction.sqrMagnitude > .000001f)
-            heading = direction.normalized;
+        var direction = new Vector3((float)message.x, (float)message.z, (float)message.y);
+        if (float.IsFinite(direction.x) && float.IsFinite(direction.y) &&
+            float.IsFinite(direction.z) && direction.sqrMagnitude > .000001f)
+        {
+            direction.Normalize();
+            if ((direction - heading).sqrMagnitude > .000001f)
+                nextCapture = 0; // A new view need not wait for the old view's cadence.
+            heading = direction;
+        }
     }
 
     void LateUpdate()
@@ -82,12 +88,18 @@ public sealed class ForwardObstacleCamera : MonoBehaviour
         }
         // Pan below the body, near the carried envelope's vertical centre.
         // This does not change the drone transform or spectator camera.
+        // Looking straight up/down needs a non-parallel reference-up vector.
+        var referenceUp = Mathf.Abs(Vector3.Dot(heading, Vector3.up)) > .99f
+            ? Vector3.forward : Vector3.up;
         sensor.transform.SetPositionAndRotation(transform.position + Vector3.down * .5f,
-            Quaternion.LookRotation(heading, Vector3.up));
+            Quaternion.LookRotation(heading, referenceUp));
         if (capture == null)
             capture = new RgbDepthCapture(sensor, MinimumDepth, MaximumDepth, reportClearRange: true);
         var stamp = DroneCameraMessages.UtcStamp();
         var frame = CaptureWithoutOwnBody();
+        // The course includes conservative solid collision proxies without
+        // renderers. Ranges must observe those surfaces as well as visible mesh.
+        PhysicsObstacleDepth.Measure(frame, sensor.SensorCamera, transform);
         return DroneCameraMessages.Build(frame, sensor.SensorCamera,
             transform.position, transform.rotation, sequence++, stamp, OpticalFrame);
     }

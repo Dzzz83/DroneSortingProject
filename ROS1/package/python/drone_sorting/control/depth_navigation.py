@@ -17,8 +17,10 @@ from drone_sorting.interfaces import ros_topics as topics
 
 class DepthNavigation:
     def __init__(self):
-        self.follower = DepthPathFollower()
+        self.follower = DepthPathFollower(maximum_observation_age=float(
+            rospy.get_param('~depth_maximum_observation_age', .5)))
         self.reset_sequence = None
+        self.package_attached = False
         self.mission_target = None
         self.contact_detected = False
         self.course_received = None
@@ -27,6 +29,8 @@ class DepthNavigation:
         self.last_scan = -math.inf
         self.scan_index = 0
         self.last_hold = None
+        self.autonomous_goals = rospy.get_param('~depth_autonomous_goals', False)
+        self.allow_vertical = rospy.get_param('~depth_allow_vertical', False)
         self.goal_lookahead = float(rospy.get_param('~depth_goal_lookahead', 3.0))
         if not 0.5 <= self.goal_lookahead <= 5.0 or not math.isfinite(self.goal_lookahead):
             raise ValueError('depth_goal_lookahead must be between 0.5 and 5 m')
@@ -38,7 +42,8 @@ class DepthNavigation:
 
     def receive_course(self, message):
         try:
-            value = json.loads(message.data)['reset_sequence']
+            observation = json.loads(message.data)
+            value = observation['reset_sequence']
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 return
         except (ValueError, TypeError, KeyError):
@@ -50,10 +55,11 @@ class DepthNavigation:
             self.follower.reset()
         self.reset_sequence = value
         self.course_received = rospy.get_time()
-        try:
-            self.contact_detected |= json.loads(message.data).get("collision_observed") is True
-        except (ValueError, TypeError):
-            pass
+        self.contact_detected |= observation.get("collision_observed") is True
+        attached = observation.get('package_attached')
+        if isinstance(attached, bool) and attached != self.package_attached:
+            self.package_attached = attached
+            self.follower.reset()
 
     def receive_path(self, message):
         if message.header.frame_id != 'warehouse' or any(p.header.frame_id != 'warehouse'
@@ -66,19 +72,35 @@ class DepthNavigation:
 
     def receive_status(self, message):
         try:
-            self.follower.receive_status(json.loads(message.data))
+            status = json.loads(message.data)
+            if not isinstance(status, dict) or status.get('package_attached', False) != self.package_attached:
+                self.follower.receive_status(None)
+                return
+            if self.autonomous_goals:
+                requested = status.get('request_goal')
+                selected = status.get('goal')
+                if (requested is None or tuple(requested) != self.mission_target
+                        or status.get('reset_sequence') != self.reset_sequence):
+                    self.follower.receive_status(None)
+                    return
+                if selected is not None:
+                    if len(selected) != 3 or not all(math.isfinite(v) for v in selected):
+                        raise ValueError('invalid selected goal')
+                    self.local_goal = tuple(selected)
+            self.follower.receive_status(status)
         except (ValueError, TypeError):
             self.follower.receive_status(None)
 
     def _select_goal(self, observed, target):
-        if abs(target[2] - observed[2]) > 0.125:
+        if not self.allow_vertical and abs(target[2] - observed[2]) > 0.125:
             return None
-        distance = math.dist(observed[:2], target[:2])
-        if distance <= 0.1:
+        distance = math.dist(observed, target)
+        if distance <= self.goal_lookahead:
             return target
         length = min(distance, self.goal_lookahead)
         return (observed[0] + (target[0]-observed[0])*length/distance,
-                observed[1] + (target[1]-observed[1])*length/distance, observed[2])
+                observed[1] + (target[1]-observed[1])*length/distance,
+                observed[2] + (target[2]-observed[2])*length/distance)
 
     def _camera_direction(self, now, target, observed, hold_reason):
         dx,dy = target[0]-observed[0], target[1]-observed[1]
@@ -115,13 +137,26 @@ class DepthNavigation:
             self.mission_target = target
             self.local_goal = None
             self.follower.reset()
-        if abs(target[2]-observed[2]) > .125:
+        if not self.allow_vertical and abs(target[2]-observed[2]) > .125:
             return FollowDecision('HOLD', 'altitude_change_not_supported')
-        if self.local_goal is not None and math.dist(observed, self.local_goal) <= .15:
+        if self.autonomous_goals:
+            if now-self.last_goal_publish >= .4:
+                self.goal_publisher.publish(Point(*target))
+                self.last_goal_publish = now
+            result = (self.follower.next_step(command, observed, self.local_goal,
+                       self.reset_sequence, now, step) if self.local_goal is not None
+                      else FollowDecision('HOLD', 'awaiting_approved_path'))
+            self._camera_direction(now, target, observed, result.reason)
+            return result
+        # Only intermediate goals hand off early. Revoking the final route
+        # here would prevent the remaining 15 cm of accurate arrival.
+        if (self.local_goal is not None and self.local_goal != target
+                and math.dist(observed, self.local_goal) <= .15):
             self.local_goal = None
             self.follower.reset()
         if self.local_goal is None:
             self.local_goal = self._select_goal(observed, target)
+            self.last_goal_publish = -math.inf
         if self.local_goal is None:
             return FollowDecision('HOLD','no_valid_local_goal')
         if now-self.last_goal_publish >= .4:

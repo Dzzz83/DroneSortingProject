@@ -32,6 +32,17 @@ class LocalDepthMapTests(unittest.TestCase):
                 self.assertEqual(local.snapshot(10),[])
                 self.assertEqual(local.state_at((.125,.125,1.625),10),"unknown")
 
+    def test_opt_in_declared_clear_range_is_bounded_and_has_no_surface(self):
+        local = LocalDepthMap(MapSettings(pixel_stride=1, clear_range_evidence=True))
+        local.integrate(self.observation(np.inf), 10)
+        self.assertEqual(local.state_at((.125, 2.125, 1.125), 10), 'free')
+        self.assertFalse(any(state == 'occupied' for _, state, _ in local.snapshot(10)))
+        self.assertEqual(local.state_at((.125, 16.125, 1.125), 10), 'unknown')
+        self.assertEqual(local.state_at((1.125, 2.125, 1.125), 10), 'unknown')
+        local.reset()
+        local.integrate(self.observation(np.nan), 10)
+        self.assertEqual(local.snapshot(10), [])
+
     def test_optical_right_down_forward_transform_into_ros_axes(self):
         observation=self.observation()
         image=np.full((3,3),np.nan,dtype=np.float32); image[0,2]=3
@@ -58,6 +69,15 @@ class LocalDepthMapTests(unittest.TestCase):
         self.assertEqual(local.state_at((.125,3.125,1.125),11),"occupied")
         self.assertEqual(local.state_at((.125,3.125,1.125),12.01),"free")
         self.assertEqual(local.state_at((.125,3.125,1.125),13.01),"unknown")
+
+    def test_planning_evidence_matches_snapshot_at_expiry_and_future_boundaries(self):
+        local = self.local()
+        local.cells = {(0,0,0): [10., 11.], (1,0,0): [12., 9.],
+                       (2,0,0): [-math.inf, -math.inf]}
+        for now in (9., 10., 11., 12., 13., 13.001, 14.001):
+            with self.subTest(now=now):
+                self.assertEqual(local.evidence(now),
+                                 {cell: state for cell, state, _ in local.snapshot(now)})
 
     def test_stale_future_and_replayed_data_cannot_refresh_map(self):
         local=self.local();local.integrate(self.observation(),10)
@@ -86,6 +106,17 @@ class LocalDepthMapTests(unittest.TestCase):
         cells=list(local._ray_cells((.125,.125,.125),(.625,.625,.625)))
         self.assertEqual(cells,[(0,0,0),(1,1,1),(2,2,2)])
         self.assertEqual(list(local._ray_cells((0,0,0),(-.3,0,0))),[(-1,0,0),(-2,0,0)])
+
+    def test_batch_traversal_matches_reference_rays_at_edges_and_random_endpoints(self):
+        local = self.local()
+        local.bounds = ((-8,8), (-8,8), (-8,8))
+        random = np.random.default_rng(42)
+        endpoints = np.vstack((random.uniform(-3,3,(200,3)),
+                               [[0,0,0],[-.3,0,0],[.5,.5,.5],[.25,0,0]]))
+        for start in ((0.,0.,0.), (.125,.125,.125), (-.25,0.,.25)):
+            expected = {cell for end in endpoints for cell in local._ray_cells(start, end)
+                        if local._inside(cell)}
+            self.assertEqual(set(local._free_ray_cells(np.array(start), endpoints)), expected)
 
     def test_observation_owns_depth_copy_and_rejects_bad_metadata(self):
         observation=self.observation()
