@@ -342,7 +342,9 @@ The reader supports the project's live `frame-*.npz` recordings and Unity
 `.json`/`.depth.f32` capture pairs. It exports `cells.csv` and `summary.json`;
 missing/expired cells are unknown. It does not load Unity obstacle geometry.
 The replay tool runs offline. For live observations, use the separate mapping-only
-launch below. Neither mode has a planner or publishes movement commands.
+launch below. Replay mode has no planner. The live mapping node also exposes a *passive*
+local planner that publishes only proposed paths and hold reasons, not movement
+commands. It holds by default until a measured vehicle envelope is configured.
 
 After normal project setup, open a Noetic terminal (`distrobox enter ros-noetic`
 when using the container). From the repository root:
@@ -396,7 +398,8 @@ controller and two public scripts. The course defaults to ROS control; spectator
 cutaways affect only the viewing camera, preserving sensor geometry and colliders.
 General route planning, repeated deliveries and automatic recovery are unfinished.
 This branch includes the forward depth sensor and a live local-map node.
-Depth-based planning and movement integration remain to be implemented.
+A conservative fixed-altitude planning prototype is available but is not
+connected to movement. Depth-based movement integration remains unfinished.
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took
 about 110 seconds in each run, within the 120-second limit. Those checks cover the

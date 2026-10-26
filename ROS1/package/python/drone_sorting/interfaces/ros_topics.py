@@ -36,4 +36,9 @@ FORWARD_RANGE_MAX = "/drone/forward_camera/range_max"
 LOCAL_MAP_OCCUPIED = "/drone/local_map/occupied"
 LOCAL_MAP_FREE = "/drone/local_map/free"
 LOCAL_MAP_STATUS = "/drone/local_map/status"
+
+# Proposed routes only; no control topic is published by the planner.
+LOCAL_PLAN_GOAL = "/drone/local_planner/goal"
+LOCAL_PLAN_PATH = "/drone/local_planner/path"
+LOCAL_PLAN_STATUS = "/drone/local_planner/status"
 COURSE_OBSERVATIONS = "/drone/course/observations"

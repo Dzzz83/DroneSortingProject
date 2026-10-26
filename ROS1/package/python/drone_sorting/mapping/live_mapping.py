@@ -8,13 +8,15 @@ from dataclasses import asdict
 import message_filters
 import numpy as np
 import rospy
-from geometry_msgs.msg import PoseStamped, Vector3
+from geometry_msgs.msg import Point, PoseStamped, Vector3
+from nav_msgs.msg import Path
 from sensor_msgs import point_cloud2
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from std_msgs.msg import Bool, Float32, Header, String
 
 from drone_sorting.interfaces import ros_topics as topics
 from drone_sorting.mapping.depth_map import DepthObservation, LocalDepthMap, MapSettings
+from drone_sorting.mapping.local_planner import LocalPlanner, VehicleEnvelope
 from drone_sorting.perception.camera_geometry import transform_point
 
 
@@ -70,6 +72,14 @@ class DepthMappingNode:
         self.reset_sequence = None
         self.range_max = None
         self.last_stamp = None
+        self.latest_position = None
+        self.local_goal = None
+        dimensions = rospy.get_param("~planner_envelope", None)
+        if dimensions is not None and (not isinstance(dimensions, (list, tuple)) or len(dimensions) != 4):
+            raise ValueError("planner_envelope must contain four measured extents")
+        self.planner = (LocalPlanner(self.map, VehicleEnvelope(*dimensions),
+                                     int(rospy.get_param("~planner_max_expansions", 4000)))
+                        if dimensions is not None else None)
         self.problem = "waiting_for_synchronized_observation"
         self.processing_ms = None
         self.accepted = self.rejected = self.superseded = 0
@@ -78,6 +88,9 @@ class DepthMappingNode:
         self.occupied_publisher = rospy.Publisher(topics.LOCAL_MAP_OCCUPIED, PointCloud2, queue_size=1)
         self.free_publisher = rospy.Publisher(topics.LOCAL_MAP_FREE, PointCloud2, queue_size=1)
         self.status_publisher = rospy.Publisher(topics.LOCAL_MAP_STATUS, String, queue_size=1)
+        self.plan_path_publisher = rospy.Publisher(topics.LOCAL_PLAN_PATH, Path, queue_size=1)
+        self.plan_status_publisher = rospy.Publisher(topics.LOCAL_PLAN_STATUS, String, queue_size=1)
+        self.goal_subscriber = rospy.Subscriber(topics.LOCAL_PLAN_GOAL, Point, self.receive_goal, queue_size=1)
         self.range_subscriber = rospy.Subscriber(topics.FORWARD_RANGE_MAX, Float32, self.receive_range, queue_size=1)
         self.reset_subscriber = rospy.Subscriber(topics.COURSE_OBSERVATIONS, String, self.receive_course, queue_size=1)
         streams = [(topics.FORWARD_DEPTH_IMAGE,Image), (topics.FORWARD_CAMERA_INFO,CameraInfo),
@@ -116,6 +129,8 @@ class DepthMappingNode:
                 self.reset_pending = True
                 self.reset_barrier = rospy.get_time()
                 self.pending = None
+                self.latest_position = None
+                self.local_goal = None
             self.reset_sequence = sequence
 
     def receive_bundle(self, *messages):
@@ -127,12 +142,20 @@ class DepthMappingNode:
                 self.superseded += 1
             self.pending = messages
 
+    def receive_goal(self, message):
+        goal = (message.x, message.y, message.z)
+        if not all(math.isfinite(value) for value in goal):
+            return
+        with self.lock:
+            self.local_goal = goal
+
     def process_once(self, now=None):
         with self.lock:
             now = rospy.get_time() if now is None else now
             if self.reset_pending:
                 self.map.reset()
                 self.last_stamp = None
+                self.latest_position = None
                 self.problem = "course_reset"
                 self.reset_pending = False
             bundle, self.pending = self.pending, None
@@ -148,7 +171,9 @@ class DepthMappingNode:
                     # also avoids carrying an earlier Play session into recovery.
                     if self.last_stamp is not None and observation.stamp-self.last_stamp > self.maximum_age:
                         self.map.reset()
+                        self.latest_position = None
                     self.map.integrate(observation, now)
+                    self.latest_position = observation.drone_position
                     self.last_stamp = observation.stamp
                     self.problem = None
                     self.accepted += 1
@@ -178,6 +203,34 @@ class DepthMappingNode:
                   "occupied_cells":len(points["occupied"]),"free_cells":len(points["free"]),
                   "reset_sequence":self.reset_sequence}
         self.status_publisher.publish(String(json.dumps(status,allow_nan=False)))
+        self.publish_plan(now, status)
+
+    def publish_plan(self, now, mapping_status):
+        # Same in-memory map as depth processing; no cloud reconstruction.
+        header = Header(stamp=rospy.Time.from_sec(now), frame_id="warehouse")
+        route = Path(header=header)
+        state, reason, expanded = "HOLD", "envelope_not_configured", 0
+        if self.planner is not None:
+            if self.local_goal is None:
+                reason = "no_local_goal"
+            elif self.latest_position is None:
+                reason = "no_current_pose"
+            elif mapping_status["state"] != "ACTIVE":
+                reason = "map_" + str(mapping_status["reason"] or "unavailable")
+            else:
+                result = self.planner.plan(self.latest_position, self.local_goal, now)
+                state, reason, expanded = result.state, result.reason, result.expanded
+                if state == "READY":
+                    for waypoint in result.path:
+                        pose = PoseStamped(header=header)
+                        pose.pose.position = Point(*waypoint)
+                        pose.pose.orientation.w = 1.0
+                        route.poses.append(pose)
+        self.plan_path_publisher.publish(route)
+        details = {"stamp":now, "frame_id":"warehouse", "state":state,
+                   "reason":reason, "waypoints":len(route.poses),
+                   "expanded":expanded, "reset_sequence":self.reset_sequence}
+        self.plan_status_publisher.publish(String(json.dumps(details,allow_nan=False)))
 
     def run(self):
         rate = rospy.Rate(self.update_rate)

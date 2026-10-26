@@ -1,5 +1,5 @@
 <launch>
-    <!-- Sensor/map only: no detector, mission, planner, controller or package commands. -->
+    <!-- Mapping and passive planning only: no detector, mission, controller or package commands. -->
     <arg name="config" default="$(find drone_sorting)/config/depth_mapping.yaml" />
     <arg name="tcp_ip" default="0.0.0.0" />
     <arg name="tcp_port" default="10000" />

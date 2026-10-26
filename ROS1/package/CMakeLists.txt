@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   sensor_msgs
   message_filters
+  nav_msgs
   tf2_msgs
 )
 
@@ -20,6 +21,7 @@ catkin_package(
     std_msgs
     sensor_msgs
     message_filters
+    nav_msgs
     tf2_msgs
 )
 
