@@ -20,8 +20,9 @@ public sealed class RgbDepthCapture : IDisposable
     private readonly float minimumDepth;
     private readonly float maximumDepth;
     private bool disposed;
+    private readonly bool reportClearRange;
 
-    public RgbDepthCapture(DroneRgbCamera sensor, float minimumDepth = 0.2f, float maximumDepth = 15f)
+    public RgbDepthCapture(DroneRgbCamera sensor, float minimumDepth = 0.2f, float maximumDepth = 15f, bool reportClearRange = false)
     {
         if (sensor == null)
             throw new ArgumentNullException(nameof(sensor));
@@ -40,6 +41,7 @@ public sealed class RgbDepthCapture : IDisposable
         this.sensor = sensor;
         this.minimumDepth = minimumDepth;
         this.maximumDepth = maximumDepth;
+        this.reportClearRange = reportClearRange;
         rgbTarget = new RenderTexture(sensor.ImageWidth, sensor.ImageHeight, 24, RenderTextureFormat.ARGB32);
         depthTarget = new RenderTexture(sensor.ImageWidth, sensor.ImageHeight, 0,
             RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear);
@@ -101,7 +103,12 @@ public sealed class RgbDepthCapture : IDisposable
                 for (int column = 0; column < width; column++)
                 {
                     float depth = depthBottomUp[sourceOffset + column];
-                    depthTopDown[outputOffset + column] =
+                    // The depth pass explicitly emits zero for rendered sky/no geometry.
+                    // Only the opt-in forward stream exposes a valid no-hit as +infinity.
+                    // NaN/negative/too-near measurements remain invalid; the pickup stream
+                    // retains its original NaN convention for every out-of-range value.
+                    bool clear = reportClearRange && (depth == 0f || (float.IsFinite(depth) && depth > maximumDepth));
+                    depthTopDown[outputOffset + column] = clear ? float.PositiveInfinity :
                         depth >= minimumDepth && depth <= maximumDepth ? depth : float.NaN;
                 }
             }

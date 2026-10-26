@@ -25,6 +25,7 @@ public static class WarehouseSetup
         EnsureComponent<PackageActionBridge>(drone);
         DroneRgbCamera.EnsureOnDrone(drone);
         EnsureComponent<DroneCameraPublisher>(drone);
+        EnsureComponent<ForwardObstacleCamera>(drone);
 
         Rigidbody body = drone.GetComponent<Rigidbody>();
 

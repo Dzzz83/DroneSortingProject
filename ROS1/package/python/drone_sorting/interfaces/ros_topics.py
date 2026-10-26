@@ -21,3 +21,19 @@ CAMERA_POSE = "/drone/camera/pose"
 CURRENT_POSE = "/drone/current_pose"
 TRANSFORMS = "/tf"
 PACKAGE_CANDIDATES = "/drone/package_candidates"
+
+FORWARD_RGB_IMAGE = "/drone/forward_camera/rgb/image_raw"
+FORWARD_DEPTH_IMAGE = "/drone/forward_camera/depth/image_raw"
+FORWARD_CAMERA_INFO = "/drone/forward_camera/camera_info"
+FORWARD_CAMERA_POSE = "/drone/forward_camera/pose"
+FORWARD_DRONE_POSE = "/drone/forward_camera/drone_pose"
+FORWARD_CAMERA_ENABLED = "/drone/avoidance/camera_enabled"
+FORWARD_CAMERA_HEADING = "/drone/avoidance/camera_heading"
+
+FORWARD_RANGE_MAX = "/drone/forward_camera/range_max"
+
+# ROS-only map outputs; Unity does not consume these topics.
+LOCAL_MAP_OCCUPIED = "/drone/local_map/occupied"
+LOCAL_MAP_FREE = "/drone/local_map/free"
+LOCAL_MAP_STATUS = "/drone/local_map/status"
+COURSE_OBSERVATIONS = "/drone/course/observations"

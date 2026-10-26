@@ -31,7 +31,7 @@ public static class DroneCameraMessages
     }
 
     public static Bundle Build(RgbDepthFrame frame, Camera camera, Vector3 dronePosition,
-        Quaternion droneRotation, uint sequence, TimeMsg stamp)
+        Quaternion droneRotation, uint sequence, TimeMsg stamp, string opticalFrame = OpticalFrame)
     {
         int pixelCount = checked(frame.Width * frame.Height);
         if (frame.Rgb.Length != pixelCount * 3 || frame.DepthMetres.Length != pixelCount)
@@ -39,7 +39,7 @@ public static class DroneCameraMessages
 
         byte[] depthBytes = new byte[pixelCount * sizeof(float)];
         Buffer.BlockCopy(frame.DepthMetres, 0, depthBytes, 0, depthBytes.Length);
-        var opticalHeader = new HeaderMsg(sequence, stamp, OpticalFrame);
+        var opticalHeader = new HeaderMsg(sequence, stamp, opticalFrame);
         Vector3 bodyPosition = ToRosWorld(dronePosition);
         Vector3 cameraPosition = ToRosWorld(frame.CameraPosition);
 
@@ -67,7 +67,7 @@ public static class DroneCameraMessages
             Transforms = new TFMessageMsg(new[]
             {
                 Transform(WorldFrame, BodyFrame, bodyPosition, bodyRotation, sequence, stamp),
-                Transform(BodyFrame, OpticalFrame, inverseBody * (cameraPosition - bodyPosition),
+                Transform(BodyFrame, opticalFrame, inverseBody * (cameraPosition - bodyPosition),
                     inverseBody * opticalRotation, sequence, stamp),
             }),
         };

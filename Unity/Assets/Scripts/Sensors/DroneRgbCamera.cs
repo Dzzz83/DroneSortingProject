@@ -62,6 +62,16 @@ public class DroneRgbCamera : MonoBehaviour
         ApplyLensSettings();
     }
 
+    public void ConfigureLens(int width, int height, float fieldOfView)
+    {
+        if (width < 1 || height < 1 || !float.IsFinite(fieldOfView) || fieldOfView <= 1 || fieldOfView >= 179)
+            throw new ArgumentOutOfRangeException(nameof(width), "Invalid sensor image dimensions or lens.");
+        imageWidth = width;
+        imageHeight = height;
+        verticalFieldOfView = fieldOfView;
+        ApplyLensSettings();
+    }
+
     public void ApplyLensSettings()
     {
         Camera camera = SensorCamera;

@@ -235,6 +235,8 @@ following generated workspace symlinks back into the package.
 | `perception/package_perception.py` | Synchronize camera inputs, call detector and publish candidates |
 | `perception/camera_validation.py`, `camera_geometry.py` | Validate camera data and convert image/depth coordinates |
 | `perception/package_localization.py`, `package_grasp.py` | Locate packages in the warehouse and estimate grasp readiness |
+| `mapping/depth_map.py` | Local map: occupied, free-ray evidence and unknown space |
+| `mapping/live_mapping.py`, `nodes/depth_mapping.py` | Synchronize forward observations, update the map and publish map/status topics |
 | `interfaces/ros_topics.py` | ROS topic names; keep aligned with Unity's `DroneRosTopics.cs` |
 
 | Unity scripts under `Unity/Assets/Scripts/` | Responsibility |
@@ -244,6 +246,7 @@ following generated workspace symlinks back into the package.
 | `ROS/DroneCommandSubscriber.cs`, `DroneStatePublisher.cs` | Apply ROS movement commands and report position |
 | `ROS/DroneObstacleSensorPublisher.cs` | Seven distances: front, upper-front, lower-front, left, right, up, down; `-1` means clear within range |
 | `Sensors/DroneRgbCamera.cs` | Drone sensor mount and lens |
+| `Sensors/ForwardObstacleCamera.cs` | Opt-in forward RGB/depth camera with independent ROS-controlled heading |
 | `Sensors/RgbDepthCapture.cs`, `RgbDepthFrame.cs` | Capture synchronized RGB/metric depth and hold frame data |
 | `ROS/DroneCameraPublisher.cs`, `DroneCameraMessages.cs` | Publish image, calibration, poses and transforms |
 | `ROS/PackageActionBridge.cs`, `DroneRosTopics.cs` | Translate ROS package actions/confirmations; shared topic names |
@@ -277,6 +280,11 @@ flowchart LR
 | `/drone/{mission_state,pickup_trial_status}` | `String` public mission state and detailed guidance JSON |
 | `/drone/camera/{rgb/image_raw,depth/image_raw,camera_info,pose}` | RGB8, metric 32FC1 depth, calibration and camera pose |
 | `/drone/current_pose`, `/tf`, `/drone/package_candidates` | Drone pose, transforms and perception JSON |
+| `/drone/forward_camera/{rgb/image_raw,depth/image_raw,camera_info,pose,drone_pose}` | `Image` RGB8/32FC1 depth, `CameraInfo` calibration and `PoseStamped` camera/drone poses sharing a capture timestamp |
+| `/drone/forward_camera/range_max` | `Float32`: maximum optical-axis depth, 15 m |
+| `/drone/avoidance/{camera_enabled,camera_heading}` | `Bool` enable request and `Vector3` heading in ROS warehouse axes; only horizontal X/Y are used |
+| `/drone/local_map/{occupied,free}` | Separate `sensor_msgs/PointCloud2` voxel centres in ROS `warehouse`; unknown cells are absent |
+| `/drone/local_map/status` | `String` JSON: observation age, processing time, cell counts, reset sequence and wait/rejection reason |
 
 Runtime node names `camera_pickup` and `package_perception` match the YAML sections.
 They are ROS identities; the readable entry points are `mission.py` and `perception.py`.
@@ -295,12 +303,100 @@ PYTHONPATH="$PWD/ROS1/package/python:$PWD/ROS1/tools:$PYTHONPATH" \
 Host Python skips ROS-dependent checks. For Unity changes, compile in the editor,
 then run ROS and Unity together and inspect physical pickup and placement.
 
+### Depth-based sensor and local map
+
+The forward camera is separate from the package camera: 320 × 240 RGB/depth at a
+requested 6 Hz, mounted 0.5 m below the drone root. Calibration uses optical axes
+X right, Y down, Z forward; camera/drone poses use ROS `warehouse` coordinates
+(X/Y horizontal, Z up). Depth is optical-axis metres in [0.2, 15]. Positive infinity
+means rendered no-hit within the declared range; NaN means invalid or too near.
+The package camera retains its existing settings and NaN convention.
+
+`WarehouseSetup` installs the forward sensor at runtime. It stays idle until a ROS
+consumer requests capture. Consumers should repeat enable/heading requests until
+frames arrive after startup or reconnection. Match bundles by acquisition timestamp,
+not independent per-topic sequence counters. Drone body renderers are hidden only
+during capture; carried-package geometry remains visible as a real occluder. Body
+meshes use a per-renderer CPU fallback so HDRP applies that mask reliably; original
+material properties are restored when the sensor is disabled.
+
+The local map uses 0.25 m voxels in a window approximately 16 × 16 × 6 m centred
+on the drone, retains observations for 2 seconds and samples every eighth pixel in
+each direction. Finite returns mark occupied cells with a configurable 0.1 m
+surface uncertainty band and contribute free-ray evidence before the surface.
+Invalid/no-hit readings, unseen regions and expired evidence remain unknown.
+Occupied evidence takes priority until it expires. A free-ray cell does not
+certify clearance for the drone/package volume. Call `reset()` for a new trial.
+These defaults are map parameters, not validated flight-clearance margins.
+
+Replay existing project forward-camera recordings from the repository root
+(`python3` needs NumPy; choose a new output directory for every run):
+
+```bash
+PYTHONPATH="$PWD/ROS1/package/python:$PYTHONPATH" \
+  python3 ROS1/tools/replay_depth_map.py \
+  --input /path/to/forward-recordings --output ROS1/build/depth-map-replay
+```
+
+The reader supports the project's live `frame-*.npz` recordings and Unity
+`.json`/`.depth.f32` capture pairs. It exports `cells.csv` and `summary.json`;
+missing/expired cells are unknown. It does not load Unity obstacle geometry.
+The replay tool runs offline. For live observations, use the separate mapping-only
+launch below. Neither mode has a planner or publishes movement commands.
+
+After normal project setup, open a Noetic terminal (`distrobox enter ros-noetic`
+when using the container). From the repository root:
+
+```bash
+source /opt/ros/noetic/setup.bash
+cd ROS1/build/linux-camera-workspace
+catkin_make -j2 -l2
+source devel/setup.bash
+roslaunch drone_sorting depth_mapping.launch
+```
+
+Open `Unity/Assets/Scenes/TwoWarehouseDelivery.unity` in Unity and press Play.
+Use this launch instead of `run_demo.sh` for mapping-only work: it starts just the
+ROS-TCP endpoint and map node, without detector, mission or controller nodes.
+Stop Play, then use Ctrl+C in the launch terminal to stop ROS. The node releases
+its camera-enable request on shutdown.
+
+Edit `ROS1/package/config/depth_mapping.yaml` for resolution, horizontal/vertical
+window radii, history age, uncertainty margin, pixel stride, accepted observation
+age, update rate and camera heading (ROS horizontal X/Y). The default map loop is
+4 Hz and accepts observations no older than 0.5 s. Camera requests repeat at 1 Hz
+through startup/reconnection. Synchronization uses acquisition timestamps, not
+per-topic sequence numbers. There is one replaceable pending bundle; newer complete
+observations supersede pending work instead of creating a processing backlog.
+
+Inspect `/drone/local_map/status` with `rostopic echo`. If RViz is available, set
+Fixed Frame to `warehouse` and add PointCloud2 displays for the occupied/free
+topics. Point positions are voxel centres. Clouds are evaluated at their header
+stamp; status separately reports the last accepted observation's age. `ACTIVE`
+means the input is being mapped, not that a route is safe. Free cells remain
+sampled-ray evidence, not clearance for the drone/package volume.
+
+When input stops, status becomes `WAITING` with `stale_observation`. Both clouds
+continue publishing and become empty as evidence exceeds the 2 s history age.
+A changed course `reset_sequence` clears the map and pending observations; captures
+preceding the received reset are rejected. Recovery after an input gap longer
+than the accepted observation age starts a fresh history. Course observations
+supply only the reset sequence; their package/geometry fields are not map inputs.
+
+A stationary live integration check accepted 27 observations with no rejected
+frames, produced occupied/free clouds and emptied both after input stopped.
+The separate position subscriber received no samples, so that run did not verify
+zero drift. Nineteen focused map/adapter tests and the catkin build passed.
+Movement, bypass planning and full-course mapping remain unverified.
+
 ## Current Status
 
 The original warehouse demo and a two-warehouse course profile share one motion
 controller and two public scripts. The course defaults to ROS control; spectator
 cutaways affect only the viewing camera, preserving sensor geometry and colliders.
 General route planning, repeated deliveries and automatic recovery are unfinished.
+This branch includes the forward depth sensor and a live local-map node.
+Depth-based planning and movement integration remain to be implemented.
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took
 about 110 seconds in each run, within the 120-second limit. Those checks cover the

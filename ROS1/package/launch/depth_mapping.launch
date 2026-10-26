@@ -1,0 +1,13 @@
+<launch>
+    <!-- Sensor/map only: no detector, mission, planner, controller or package commands. -->
+    <arg name="config" default="$(find drone_sorting)/config/depth_mapping.yaml" />
+    <arg name="tcp_ip" default="0.0.0.0" />
+    <arg name="tcp_port" default="10000" />
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint.launch">
+        <arg name="tcp_ip" value="$(arg tcp_ip)" />
+        <arg name="tcp_port" value="$(arg tcp_port)" />
+    </include>
+    <node pkg="drone_sorting" type="depth_mapping.py" name="depth_mapping" output="screen" required="true">
+        <rosparam command="load" file="$(arg config)" />
+    </node>
+</launch>

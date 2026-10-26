@@ -1,0 +1,10 @@
+# Private depth_mapping parameters. ROS warehouse X/Y horizontal, Z up; metres/seconds.
+resolution: 0.25
+radius: 8.0
+vertical_radius: 3.0
+maximum_age: 2.0
+surface_margin: 0.1
+pixel_stride: 8
+maximum_observation_age: 0.5
+update_rate: 4.0
+camera_heading: [0.0, 1.0]
