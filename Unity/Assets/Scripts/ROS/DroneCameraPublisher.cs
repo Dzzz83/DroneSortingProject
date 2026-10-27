@@ -1,5 +1,6 @@
 using System;
 using RosMessageTypes.Geometry;
+using RosMessageTypes.Std;
 using RosMessageTypes.Sensor;
 using RosMessageTypes.Tf2;
 using Unity.Robotics.ROSTCPConnector;
@@ -18,6 +19,7 @@ public class DroneCameraPublisher : MonoBehaviour
     private RgbDepthCapture capture;
     private double nextCaptureTime;
     private uint sequence;
+    private bool requested = true;
 
     private void Start()
     {
@@ -29,11 +31,12 @@ public class DroneCameraPublisher : MonoBehaviour
         ros.RegisterPublisher<PoseStampedMsg>(DroneRosTopics.CameraPose, queue_size: 1);
         ros.RegisterPublisher<PoseStampedMsg>(DroneRosTopics.CurrentPose, queue_size: 1);
         ros.RegisterPublisher<TFMessageMsg>(DroneRosTopics.Transforms, queue_size: 1);
+        ros.Subscribe<BoolMsg>(DroneRosTopics.PackageCameraEnabled, message => requested = message.data);
     }
 
     private void LateUpdate()
     {
-        if (ros == null || !ros.HasConnectionThread || ros.HasConnectionError ||
+        if (!requested || ros == null || !ros.HasConnectionThread || ros.HasConnectionError ||
             Time.unscaledTimeAsDouble < nextCaptureTime) return;
 
         // Never accumulate a backlog or burst to catch up after a slow capture.

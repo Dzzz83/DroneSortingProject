@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 /// <summary>Course spectator views, free flight and an adjustable drone-follow offset.</summary>
 [RequireComponent(typeof(Camera))]
@@ -12,6 +13,9 @@ public sealed class WarehouseCourseViews : MonoBehaviour
     [SerializeField, Min(.1f)] float moveSpeed = 6f;
     [SerializeField, Min(1f)] float fastMoveMultiplier = 3f;
     [SerializeField, Min(.1f)] float lookSensitivity = 2f;
+    [SerializeField, Min(.1f)] float followSmoothing = 12f;
+    [SerializeField, Min(.1f)] float viewRotationSmoothing = 14f;
+    bool snapNextView = true;
     static readonly Vector3 DefaultFollowOffset = new Vector3(8,5,-9);
     Vector3 followOffset = DefaultFollowOffset;
     int view = 2;
@@ -28,6 +32,23 @@ public sealed class WarehouseCourseViews : MonoBehaviour
         spectator = GetComponent<Camera>();
         originalCullingMask = spectator.cullingMask;
         ConfigureRoofs();
+        if (!Application.isEditor) ConfigureRecordingRendering();
+    }
+
+    public void ConfigureRecordingRendering()
+    {
+        var data = GetComponent<HDAdditionalCameraData>();
+        if (data == null) return;
+        // Only the spectator changes: depth physics and sensor cameras retain
+        // their own settings. These effects otherwise consume capture headroom.
+        data.customRenderingSettings = true;
+        foreach (var field in new[] { FrameSettingsField.SSAO, FrameSettingsField.SSGI,
+                                      FrameSettingsField.Volumetrics })
+        {
+            data.renderingPathCustomFrameSettings.SetEnabled(field,false);
+            data.renderingPathCustomFrameSettingsOverrideMask.mask[(uint)field] = true;
+        }
+        data.antialiasing = HDAdditionalCameraData.AntialiasingMode.FastApproximateAntialiasing;
     }
 
     public void ConfigureRoofs()
@@ -50,6 +71,7 @@ public sealed class WarehouseCourseViews : MonoBehaviour
         view = index;
         freeCamera = false;
         followOffset = DefaultFollowOffset;
+        snapNextView = true; // Key-selected views remain immediate.
         RefreshView();
     }
 
@@ -85,6 +107,7 @@ public sealed class WarehouseCourseViews : MonoBehaviour
 
     public void AdjustView(Vector2 look, Vector3 movement, bool fast, float deltaTime)
     {
+        snapNextView = true; // Manual input responds immediately; passive follow is damped.
         float speed = moveSpeed * (fast ? fastMoveMultiplier : 1f);
         if (view == 1)
         {
@@ -117,7 +140,9 @@ public sealed class WarehouseCourseViews : MonoBehaviour
         }
     }
 
-    public void RefreshView()
+    public void RefreshView() => RefreshView(Time.unscaledDeltaTime);
+
+    public void RefreshView(float deltaTime)
     {
         if (spectator == null || drone == null) return;
         // Only this camera cuts away the roof. Sensor rendering and physics keep it.
@@ -126,7 +151,15 @@ public sealed class WarehouseCourseViews : MonoBehaviour
         if (freeCamera) return;
         Vector3 position = view == 0 ? overviewPosition : view == 2 ? yardPosition : drone.position + followOffset;
         Vector3 target = view == 0 ? overviewTarget : view == 2 ? yardTarget : drone.position;
-        transform.SetPositionAndRotation(position,Quaternion.LookRotation(target-position));
+        var rotation = Quaternion.LookRotation(target - position);
+        if (snapNextView) transform.SetPositionAndRotation(position, rotation);
+        else
+        {
+            float dt = Mathf.Max(0f, deltaTime);
+            transform.position = Vector3.Lerp(transform.position, position, 1f - Mathf.Exp(-followSmoothing * dt));
+            transform.rotation = Quaternion.Slerp(transform.rotation, rotation, 1f - Mathf.Exp(-viewRotationSmoothing * dt));
+        }
+        snapNextView = false;
     }
 
     void ReleaseCursor()

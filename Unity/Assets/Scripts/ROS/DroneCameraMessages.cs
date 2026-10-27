@@ -32,9 +32,19 @@ public static class DroneCameraMessages
 
     public static Bundle Build(RgbDepthFrame frame, Camera camera, Vector3 dronePosition,
         Quaternion droneRotation, uint sequence, TimeMsg stamp, string opticalFrame = OpticalFrame)
+        => BuildCore(frame, camera, dronePosition, droneRotation, sequence, stamp, opticalFrame, true);
+
+    // Navigation depth has no RGB acquisition. Never fabricate or publish an RGB image.
+    public static Bundle BuildDepth(RgbDepthFrame frame, Camera camera, Vector3 dronePosition,
+        Quaternion droneRotation, uint sequence, TimeMsg stamp, string opticalFrame = OpticalFrame)
+        => BuildCore(frame, camera, dronePosition, droneRotation, sequence, stamp, opticalFrame, false);
+
+    static Bundle BuildCore(RgbDepthFrame frame, Camera camera, Vector3 dronePosition,
+        Quaternion droneRotation, uint sequence, TimeMsg stamp, string opticalFrame, bool includeRgb)
     {
         int pixelCount = checked(frame.Width * frame.Height);
-        if (frame.Rgb.Length != pixelCount * 3 || frame.DepthMetres.Length != pixelCount)
+        if (frame.DepthMetres.Length != pixelCount ||
+            (includeRgb && (frame.Rgb == null || frame.Rgb.Length != pixelCount * 3)))
             throw new ArgumentException("Frame dimensions do not match its pixel arrays.");
 
         byte[] depthBytes = new byte[pixelCount * sizeof(float)];
@@ -56,8 +66,8 @@ public static class DroneCameraMessages
 
         return new Bundle
         {
-            Rgb = new ImageMsg(opticalHeader, (uint)frame.Height, (uint)frame.Width,
-                "rgb8", 0, (uint)(frame.Width * 3), frame.Rgb),
+            Rgb = includeRgb ? new ImageMsg(opticalHeader, (uint)frame.Height, (uint)frame.Width,
+                "rgb8", 0, (uint)(frame.Width * 3), frame.Rgb) : null,
             Depth = new ImageMsg(opticalHeader, (uint)frame.Height, (uint)frame.Width,
                 "32FC1", (byte)(BitConverter.IsLittleEndian ? 0 : 1),
                 (uint)(frame.Width * sizeof(float)), depthBytes),

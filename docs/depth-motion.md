@@ -253,3 +253,31 @@ then perform the short live experiment. Measure the real envelope first.
 **Remaining limitations:** the unloaded envelope uses provisional clearance
 margins; dynamic obstacles, other course layouts and carried-package avoidance
 remain unverified. Package handling is outside the current navigation-only goal.
+
+## Opt-in smooth navigation transport (2026-10)
+
+The navigation demo uses `/drone/approved_trajectory` (String JSON). ROS remains
+the only movement-command publisher. Each command authorizes one short, ordered
+segment, constrained by a 0.25 m outstanding-motion limit and by the original
+0.35 s plan / 0.5 s observation freshness. Unity interpolates within approved
+segments, never directly across waypoints. Wrong-reset, expired, malformed,
+out-of-order, excess-buffer and contact conditions stop execution. The ROS
+controller sends explicit STOP on planning holds and waits for a matching
+`/drone/trajectory_status` acknowledgement before anchoring a new chain; reset
+clears both ends. Unity continues providing
+actual applied-position feedback. Legacy `/drone/command_position` is unchanged
+for the non-navigation demos. Full contract and limitations are in
+`docs/navigation-smoothness.md`.
+
+Baseline from earlier manual runs: 152.1 s and 151.4 s at requested 2 m/s,
+zero reported contact. The review run reached B without reported contact in
+184.0 s, exposing near-expiry approval churn. After the scheduling fix, a 10 m
+confirmation reached its target without local expiry/rejection stops. Full-course
+timing at that stage remained unverified. The follow-up below provides the later
+full-course result; see `docs/navigation-smoothness.md`.
+
+Follow-up: optimized map processing, route-relative pose validation, queued waypoint
+completion, 50 Hz navigation approvals and feedback after movement passed 224 tests.
+The next full ROS–Unity run arrived without reported contacts in 112.5 s, versus
+184.0 s before these changes. Safety waits remain; continuous 2 m/s and completely
+smooth rendering are not established. Measurements: `docs/navigation-smoothness.md`.

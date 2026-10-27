@@ -100,6 +100,17 @@ class LocalDepthMapTests(unittest.TestCase):
         local.integrate(self.observation(stamp=11,position=(100,100,2.5),root=(100,100,3)),11)
         self.assertEqual(local.state_at((.125,3.125,1.125),11),"unknown")
 
+    def test_window_pruning_keeps_inclusive_faces_and_independent_evidence_times(self):
+        local = LocalDepthMap(MapSettings(radius=1.,vertical_radius=1.,pixel_stride=1))
+        local.cells = {(-4,-4,-4):[8.,-math.inf], (4,4,4):[9.,8.],
+                       (0,0,0):[9.,7.], (5,0,0):[9.,9.],
+                       (1,0,0):[7.999,-math.inf], (2,0,0):[9.,10.1]}
+        local.integrate(self.observation(depth=np.nan,root=(0,0,0)),10.)
+        self.assertEqual(set(local.cells),{(-4,-4,-4),(4,4,4),(0,0,0)})
+        self.assertEqual(local.cell_state((-4,-4,-4),10.),"free")
+        self.assertEqual(local.cell_state((4,4,4),10.),"occupied")
+        self.assertEqual(local.cell_state((0,0,0),10.),"free")
+
     def test_negative_cell_coordinates_and_corner_traversal(self):
         local=self.local()
         self.assertEqual(local.cell_at((-.001,.25,-.25)),(-1,1,-1))

@@ -234,7 +234,7 @@ following generated workspace symlinks back into the package.
 | `mission/delivery.py` | ROS transport: read settings, receive feedback, publish targets/actions/state |
 | `mission/delivery_guidance.py` | Observation access, carry, lower, release and settling |
 | `mission/pickup_guidance.py` | Select/track a package, align, descend, request pickup and lift |
-| `control/motion_controller.py` | One controller: absolute position commands at 20 Hz, avoidance, stale-data stops and bounded command lead |
+| `control/motion_controller.py` | One controller: legacy position commands at 20 Hz, navigation approvals at 50 Hz, avoidance, stale-data stops and bounded command lead |
 | `perception/package_perception.py` | Synchronize camera inputs, call detector and publish candidates |
 | `perception/camera_validation.py`, `camera_geometry.py` | Validate camera data and convert image/depth coordinates |
 | `perception/package_localization.py`, `package_grasp.py` | Locate packages in the warehouse and estimate grasp readiness |
@@ -420,6 +420,13 @@ covers repeated nearby arrivals and approval-expiry stopping.
 
 ## Navigation-only A-to-B demo
 
+For teammates with the existing Linux/Noetic setup, pull the latest
+`feat/depth-avoidance` branch in the same checkout. Open the Unity project with
+Editor **6000.6.0f1**, let imports and compilation finish, then follow the command
+below. No detector setup is needed for navigation. The existing prepared ROS
+workspace must still be present; the launcher rebuilds it against the updated
+sources. If Unity reports missing Git LFS assets, run `git lfs pull` first.
+
 Open `Unity/Assets/Scenes/TwoWarehouseDelivery.unity` in Unity, then run:
 
 ```bash
@@ -518,3 +525,61 @@ inference (`detector.log`), mission (`monitor.log`), build (`build.log`) and ROS
 (`ros-logs/`). The next launch removes completed runs, preserves live logs, and
 moves Unity recovery scenes to `Unity/UserSettings/SceneBackups/`. Keep
 `Unity/Library/` to avoid full reimports. Save intentional edits before restarting.
+
+### Navigation demo: smoother ROS-approved motion (opt-in)
+
+Run `bash ROS1/scripts/run_navigation.sh`, then open `TwoWarehouseDelivery` and press Play.
+Only this launcher opts into `/drone/approved_trajectory` (short ordered segments,
+reset identity, expiry and STOP). Unity acknowledges stopped motion and its
+actual ROS position on `/drone/trajectory_status` before each restart. Legacy
+point commands and package workflows are unchanged. Navigation pauses the unused package camera through
+`/drone/camera/enabled` (`std_msgs/Bool`) and uses physics-only forward depth,
+with no synthetic RGB;
+Navigation requests approvals at 50 Hz; legacy control remains at 20 Hz.
+Unity reports applied pose after movement, nominally every 0.05 s, retaining
+fractional frame time instead of discarding it. See
+[`docs/navigation-smoothness.md`](docs/navigation-smoothness.md) for safety and verification.
+
+Verification: all 224 Python tests passed, and the user confirmed Unity compiled
+the follow-up changes. The latest full A-to-B run arrived in 112.5 s with zero
+reported final error and no reported contacts, versus 184 s in the previous review
+run. Pauses remain; this does not establish continuous 2 m/s or fully smooth
+rendering. Details and measured limits are in the linked report.
+
+### Standalone recording test workflow (recording slowdown unresolved)
+
+Use the same ROS navigation in a standalone course window:
+
+```bash
+bash ROS1/scripts/run_recording_demo.sh
+```
+
+The first run builds only `TwoWarehouseDelivery`. If Unity is open, stop Play and
+press Ctrl+R; the build helper handles the pending request automatically. Save any
+intentional scene edits first, then close the Editor before running the player;
+keeping both open exhausted this machine's GPU memory budget. With Unity closed,
+the launcher builds through the
+installed Unity editor. Subsequent runs reuse the built player; use `--rebuild`
+after changing scripts or the scene. Build output is ignored under
+`Unity/Builds/CourseRecording/`.
+
+The player requests a 1280×720 window, caps rendering at 30 FPS, and keeps running
+when recorder controls take focus. The compositor may tile/scale the window.
+It uses XWayland on this machine because the native Wayland player exited with
+a compositor FIFO error. Spectator-only HDRP overrides disable ambient occlusion,
+screen-space global illumination and volumetric fog, with lightweight FXAA. Camera controls are unchanged. Record this window;
+do not press Play in the Editor as well. Ctrl+C stops ROS and the launched player.
+The speed remains 2 m/s, and sensing, navigation and safety limits are unchanged.
+
+Unity documents [Editor focus throttling down to roughly 5–10 FPS](https://issuetracker.unity.com/issues/3601/low-fps-in-the-game-view-when-the-editor-window-loses-focus),
+including during Play, and recommends a standalone player when background
+execution is needed. `Application.runInBackground` addresses player focus loss;
+it does not remove that Editor limitation.
+
+**Recording slowdown remains unresolved.** The final matched 10 m trial took
+17.9 s without recording and 32.3 s with `wf-recorder` capped at 30 FPS using
+NVIDIA H.264 encoding. Both arrived with zero reported error and no reported
+contacts, but recording still increased travel time substantially. No full-course
+recording success is claimed. The user's Super+Shift+R script was inspected but
+left unchanged; the hardware recorder settings were tested as separate commands.
+See `docs/navigation-smoothness.md` for the complete comparison.

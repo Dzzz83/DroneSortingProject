@@ -4,6 +4,7 @@ import math
 import threading
 import time
 from dataclasses import asdict
+from collections import Counter
 
 import message_filters
 import numpy as np
@@ -290,9 +291,9 @@ class DepthMappingNode:
         snapshot_started = time.perf_counter()
         resolution = self.map.settings.resolution
         evidence = self.map.evidence(now)
-        for cell,state in evidence.items():
-            counts[state] += 1
-            if cloud_requested:
+        counts.update(Counter(evidence.values()))
+        if cloud_requested:
+            for cell, state in evidence.items():
                 points[state].append(tuple((index+.5)*resolution for index in cell))
         self.timings["snapshot_ms"] = (time.perf_counter()-snapshot_started)*1000
         header = Header(stamp=rospy.Time.from_sec(now),frame_id="warehouse")

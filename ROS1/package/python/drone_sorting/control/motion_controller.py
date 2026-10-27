@@ -7,6 +7,7 @@ import rospy
 from geometry_msgs.msg import Point
 from std_msgs.msg import Float32, Float32MultiArray, String
 from drone_sorting.interfaces import ros_topics
+from drone_sorting.control.approved_trajectory import ApprovedTrajectoryStream, InsufficientTrajectoryTime
 
 
 class MotionController:
@@ -16,7 +17,9 @@ class MotionController:
             raise ValueError("Motion speed must be finite and positive")
         self.maximum_speed = self.speed
         self.enable_dynamic_speed = rospy.get_param("~enable_dynamic_speed", False)
-        self.update_rate = 20.0
+        self.update_rate = float(rospy.get_param("~update_rate", 20.0))
+        if not math.isfinite(self.update_rate) or not 1 <= self.update_rate <= 100:
+            raise ValueError("update_rate must be between 1 and 100 Hz")
         # Bound outstanding movement while waiting for Unity's slower position feedback.
         self.maximum_command_lead = float(rospy.get_param("~maximum_command_lead", 0.25))
         if not math.isfinite(self.maximum_command_lead) or self.maximum_command_lead <= 0:
@@ -31,6 +34,7 @@ class MotionController:
                 raise ValueError(name + " must be finite and nonnegative")
 
         self.position_received = None
+        self.position_progress_at = None
         self.target_received = None
         self.speed_received = None
         if self.enable_dynamic_speed:
@@ -52,6 +56,20 @@ class MotionController:
             raise ValueError("Depth mode requires nonzero position, target and active speed timeouts")
         self.depth_navigation = None
         self.depth_reset_seen = None
+        self.use_approved_trajectories = (mode == "depth" and bool(
+            rospy.get_param("~depth_smooth_trajectory_enabled", False)))
+        self.trajectory_stream = ApprovedTrajectoryStream() if self.use_approved_trajectories else None
+        self.trajectory_publisher = (rospy.Publisher(
+            ros_topics.APPROVED_TRAJECTORY, String, queue_size=20)
+            if self.use_approved_trajectories else None)
+
+        self.trajectory_status = None
+        self.trajectory_status_received = None
+        self.trajectory_stop_sequence = None
+        self.trajectory_needs_sync = True
+        self.trajectory_first_move = None
+        if self.use_approved_trajectories:
+            rospy.Subscriber(ros_topics.TRAJECTORY_STATUS, String, self._trajectory_status_callback)
 
         self.current_position = None
         self.target_position = None
@@ -127,12 +145,66 @@ class MotionController:
     def _current_position_callback(self, message):
         if not all(math.isfinite(value) for value in (message.x, message.y, message.z)):
             return
-        self.position_received = rospy.get_time()
+        received_at = rospy.get_time()
+        if (self.current_position is None or math.dist(
+                (message.x, message.y, message.z),
+                (self.current_position.x, self.current_position.y, self.current_position.z)) > .002):
+            self.position_progress_at = received_at
+        self.position_received = received_at
         self.current_position = Point(x=message.x, y=message.y, z=message.z)
         # Feedback reports an earlier applied command. Replacing the command here
         # would replay old positions and move the drone backward on every update.
         if self.command_position is None:
             self.command_position = Point(x=message.x, y=message.y, z=message.z)
+
+    def _trajectory_status_callback(self, message):
+        try:
+            status = json.loads(message.data)
+            for key in ("reset_sequence", "sequence"):
+                if type(status[key]) is not int or status[key] < 0:
+                    return
+            if type(status["stopped"]) is not bool:
+                return
+            position = status["position"]
+            if not all(type(position[k]) in (int, float) and math.isfinite(position[k])
+                       for k in ("x", "y", "z")):
+                return
+            stamp = status["stamp_ms"] / 1000.0
+            if not 0 <= rospy.get_time() - stamp <= .5:
+                return
+        except (ValueError, KeyError, TypeError, OverflowError):
+            return
+        self.trajectory_status = status
+        self.trajectory_status_received = rospy.get_time()
+
+    def _trajectory_ready(self, now):
+        """Restart only from Unity's acknowledged, stationary applied position."""
+        if self.trajectory_stream is None:
+            return True
+        if self.depth_navigation.reset_sequence is None:
+            return False
+        if self.trajectory_needs_sync and self.trajectory_stop_sequence is None:
+            self._stop_trajectory(force=True)
+        status = self.trajectory_status
+        if (status is None or status["reset_sequence"] != self.depth_navigation.reset_sequence
+                or self._feedback_expired(self.trajectory_status_received, .5, now)
+                or not 0 <= now - status["stamp_ms"] / 1000.0 <= .5):
+            self._stop_trajectory()
+            return False
+        if self.trajectory_stop_sequence is not None:
+            if status["stopped"] and status["sequence"] == self.trajectory_stop_sequence:
+                position = status["position"]
+                self.command_position = Point(position["x"], position["y"], position["z"])
+                self.trajectory_stop_sequence = None
+                self.trajectory_needs_sync = False
+                self.trajectory_first_move = None
+            return False
+        if (self.trajectory_stream.in_motion and status["stopped"]
+                and self.trajectory_first_move is not None
+                and status["sequence"] >= self.trajectory_first_move):
+            self._stop_trajectory()
+            return False
+        return True
 
     def _target_position_callback(self, message):
         if not all(math.isfinite(value) for value in (message.x, message.y, message.z)):
@@ -264,24 +336,38 @@ class MotionController:
                     self.command_position = None
                     self.current_position = None
                     self.position_received = None
+                    self.position_progress_at = None
                     self.target_position = None
                     self.target_received = None
                 self.depth_reset_seen = sequence
-        if self.command_position is None or self.target_position is None:
-            return
-
+                if self.trajectory_stream is not None:
+                    self.trajectory_stream.reset(sequence)
+                    self.trajectory_needs_sync = True
+                    self.trajectory_stop_sequence = None
+                    self.trajectory_first_move = None
+                    self.trajectory_status = None
         now = rospy.get_time()
+        if not self._trajectory_ready(now):
+            return
+        if self.command_position is None or self.target_position is None or self.current_position is None:
+            return
         if (self._feedback_expired(self.position_received, self.position_timeout, now)
                 or self._feedback_expired(self.target_received, self.target_timeout, now)):
+            self._stop_trajectory()
             return
         if self.enable_dynamic_speed and (self.speed_received is None
                 or self._feedback_expired(self.speed_received, self.speed_timeout, now)):
+            self._stop_trajectory()
             return
         # Unity holds its last applied position. Do not publish lagging feedback
         # as a hold command, which could move the drone backward.
         if self.speed == 0:
+            self._stop_trajectory()
             return
         if not self._within_feedback_limit(self.command_position):
+            if (self.trajectory_stream is not None and self.position_progress_at is not None
+                    and now - self.position_progress_at > .25):
+                self._stop_trajectory()
             self._log_status("WAIT_FOR_FEEDBACK")
             return
 
@@ -347,15 +433,62 @@ class MotionController:
             (observed.x, observed.y, observed.z),
             (target.x, target.y, target.z), now, self.speed/self.update_rate)
         if result.state != "MOVE":
+            # The command frontier can reach a waypoint before Unity applies its
+            # queued segments. Let those existing approvals finish; stopping here
+            # cancels the last part of every local leg and forces a restart.
+            if result.reason != "local_goal_reached":
+                self._stop_trajectory()
             self._log_status("DEPTH_HOLD: " + result.reason)
-            return  # Unity maintains its last applied kinematic position.
+            return  # Unity stops pending segments, not just new publication.
         approved = Point(*result.next_position)
         if not self._within_feedback_limit(approved):
+            if (self.position_progress_at is not None and now - self.position_progress_at > .25):
+                self._stop_trajectory()
             self._log_status("WAIT_FOR_FEEDBACK")
             return
+        if self.trajectory_stream is not None:
+            # Reserve outstanding travel, this segment, and local TCP/frame delay.
+            queued_distance = math.dist((observed.x, observed.y, observed.z),
+                                        (command.x, command.y, command.z))
+            segment_distance = math.dist(result.next_position, (command.x, command.y, command.z))
+            execution_window = (queued_distance + segment_distance) / self.speed + .05
+            try:
+                status = self.depth_navigation.follower.status
+                packet = self.trajectory_stream.move(
+                    (command.x, command.y, command.z),
+                    (approved.x, approved.y, approved.z),
+                    self.depth_navigation.reset_sequence, self.speed, now, status,
+                    minimum_ttl=execution_window)
+            except InsufficientTrajectoryTime:
+                self._log_status("WAIT_FOR_APPROVAL_WINDOW")
+                return  # Existing segments retain their original expiry; never extend it.
+            except ValueError:
+                self._stop_trajectory()
+                return
+            if self.trajectory_first_move is None:
+                self.trajectory_first_move = self.trajectory_stream.sequence
+            self.trajectory_publisher.publish(String(data=packet))
+        else:
+            self._publish_commands(approved)
         self.command_position = approved
-        self._publish_commands(approved)
         self._log_status("DEPTH_APPROVED")
+
+    def _stop_trajectory(self, force=False):
+        """Cancel pending motion, then wait for the applied stop acknowledgement.
+
+        Reanchoring from ordinary feedback here would race the remaining Unity
+        queue. Only _trajectory_ready may anchor, after the stop is acknowledged.
+        """
+        if self.trajectory_stream is None or self.trajectory_stop_sequence is not None:
+            return
+        sequence = self.depth_navigation.reset_sequence
+        if sequence is None:
+            return
+        packet = self.trajectory_stream.stop(sequence, force=force)
+        if packet is not None:
+            self.trajectory_stop_sequence = self.trajectory_stream.sequence
+            self.trajectory_needs_sync = True
+            self.trajectory_publisher.publish(String(data=packet))
 
     def _movement_direction(self, decision, target_direction):
         if decision == "FORWARD":

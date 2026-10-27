@@ -36,6 +36,14 @@ public sealed class WarehouseCourse : MonoBehaviour
 
     void Awake()
     {
+        if (!Application.isEditor)
+        {
+            // Recorder controls can take focus. The standalone course keeps
+            // simulation running and leaves render/encoding headroom at 30 FPS.
+            Application.runInBackground = true;
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = 30;
+        }
         flightColliders = drone.GetComponentsInChildren<BoxCollider>();
         droneStart = drone.transform.position;
         droneRotation = drone.transform.rotation;
@@ -69,6 +77,8 @@ public sealed class WarehouseCourse : MonoBehaviour
         ContactName = "";
         settled = 0;
         ResetSequence++;
+        // Cancel expiring ROS segments synchronously with the physical reset.
+        GetComponent<DroneCommandSubscriber>()?.ResetForTrial();
         Physics.SyncTransforms();
         Publish();
     }

@@ -16,6 +16,9 @@ public sealed class ForwardObstacleCamera : MonoBehaviour
     public const float MinimumDepth = .2f;
     public const float MaximumDepth = 15f;
     [SerializeField, Range(1f, 10f)] float framesPerSecond = 6f;
+    // The forward stream is opt-in and primarily consumed by the depth mapper.
+    // Turn this off to restore the original rendered RGB+depth capture.
+    [SerializeField] bool physicsDepthOnly = true;
     DroneRgbCamera sensor;
     RgbDepthCapture capture;
     ROSConnection ros;
@@ -64,7 +67,7 @@ public sealed class ForwardObstacleCamera : MonoBehaviour
             ros.Publish(DroneRosTopics.ForwardCameraPose, bundle.CameraPose);
             ros.Publish(DroneRosTopics.ForwardDronePose, bundle.DronePose);
             ros.Publish(DroneRosTopics.ForwardCameraInfo, bundle.Calibration);
-            ros.Publish(DroneRosTopics.ForwardRgbImage, bundle.Rgb);
+            if (bundle.Rgb != null) ros.Publish(DroneRosTopics.ForwardRgbImage, bundle.Rgb);
             ros.Publish(DroneRosTopics.ForwardDepthImage, bundle.Depth);
         }
         catch (Exception exception)
@@ -93,15 +96,30 @@ public sealed class ForwardObstacleCamera : MonoBehaviour
             ? Vector3.forward : Vector3.up;
         sensor.transform.SetPositionAndRotation(transform.position + Vector3.down * .5f,
             Quaternion.LookRotation(heading, referenceUp));
-        if (capture == null)
-            capture = new RgbDepthCapture(sensor, MinimumDepth, MaximumDepth, reportClearRange: true);
+        RgbDepthFrame frame;
+        if (physicsDepthOnly)
+        {
+            // No GPU render, depth shader, texture readback, or invented RGB.
+            int width = sensor.ImageWidth, height = sensor.ImageHeight;
+            frame = new RgbDepthFrame(width, height, Array.Empty<byte>(),
+                new float[width * height], Time.timeAsDouble,
+                sensor.SensorCamera.transform.position, sensor.SensorCamera.transform.rotation);
+        }
+        else
+        {
+            if (capture == null)
+                capture = new RgbDepthCapture(sensor, MinimumDepth, MaximumDepth, reportClearRange: true);
+            frame = CaptureWithoutOwnBody();
+        }
+        // Timestamp the actual physics acquisition, rather than retimestamping cached data.
         var stamp = DroneCameraMessages.UtcStamp();
-        var frame = CaptureWithoutOwnBody();
-        // The course includes conservative solid collision proxies without
-        // renderers. Ranges must observe those surfaces as well as visible mesh.
+        // Includes invisible solid collision proxies. Unsampled pixels remain NaN.
         PhysicsObstacleDepth.Measure(frame, sensor.SensorCamera, transform);
-        return DroneCameraMessages.Build(frame, sensor.SensorCamera,
-            transform.position, transform.rotation, sequence++, stamp, OpticalFrame);
+        return physicsDepthOnly
+            ? DroneCameraMessages.BuildDepth(frame, sensor.SensorCamera,
+                transform.position, transform.rotation, sequence++, stamp, OpticalFrame)
+            : DroneCameraMessages.Build(frame, sensor.SensorCamera,
+                transform.position, transform.rotation, sequence++, stamp, OpticalFrame);
     }
 
     RgbDepthFrame CaptureWithoutOwnBody()

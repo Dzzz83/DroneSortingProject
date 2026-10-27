@@ -85,8 +85,13 @@ class DepthPathFollower:
             return FollowDecision("HOLD", "route_goal_mismatch")
         if any(abs(a-b) > 1e-5 for a, b in zip(goal, self.path[-1])):
             return FollowDecision("HOLD", "route_endpoint_mismatch")
-        if math.dist(observed, self.path[0]) > self.maximum_pose_gap:
-            return FollowDecision("HOLD", "route_start_mismatch")
+        # Progress along a still-fresh certified route is expected. Comparing
+        # only to its acquisition start falsely stops a 2 m/s drone after 0.175 s
+        # (0.35 m travelled), even when it remains on the approved path.
+        pose_gap = min(self._on_segment(observed, a, b)[0]
+                       for a, b in zip(self.path, self.path[1:]))
+        if pose_gap > self.maximum_pose_gap:
+            return FollowDecision("HOLD", "route_pose_mismatch")
         # Do not rejoin a new route across unobserved space. The command must be
         # on one of the certified segments, with no off-polyline shortcut.
         # A nearby earlier segment must not hide a later exact match. Never

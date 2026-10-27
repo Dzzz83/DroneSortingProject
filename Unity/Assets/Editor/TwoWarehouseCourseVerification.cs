@@ -59,9 +59,18 @@ public static class TwoWarehouseCourseVerification
         try
         {
             cameraObject.AddComponent<Camera>();
+            var recordingCamera = cameraObject.AddComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData>();
             var views = cameraObject.AddComponent<WarehouseCourseViews>();
             // Also supports running this fixture with Play stopped.
             views.InitializeCamera();
+            views.ConfigureRecordingRendering();
+            foreach (var field in new[] {
+                UnityEngine.Rendering.HighDefinition.FrameSettingsField.SSAO,
+                UnityEngine.Rendering.HighDefinition.FrameSettingsField.SSGI,
+                UnityEngine.Rendering.HighDefinition.FrameSettingsField.Volumetrics })
+                Require(!recordingCamera.renderingPathCustomFrameSettings.IsEnabled(field) &&
+                        recordingCamera.renderingPathCustomFrameSettingsOverrideMask.mask[(uint)field],
+                    "The recording spectator disables expensive effects through camera-local overrides.");
             views.drone = target.transform;
             target.transform.position = new Vector3(-100,10,-100);
             views.overviewPosition = new Vector3(-90,20,-110);
@@ -76,7 +85,12 @@ public static class TwoWarehouseCourseVerification
             Require((customOffset-originalOffset).magnitude>.1f,"Manual follow controls change the spectator offset.");
             Vector3 displacement = new Vector3(2,1,80);
             target.transform.position += displacement;
-            views.RefreshView();
+            Vector3 beforeFollow = cameraObject.transform.position;
+            views.RefreshView(1f/60f);
+            Require(Vector3.Distance(cameraObject.transform.position,beforeFollow)>0 &&
+                    Vector3.Distance(cameraObject.transform.position,beforeFollow)<displacement.magnitude,
+                "Passive follow moves gradually rather than snapping to the drone.");
+            for (int frame=0; frame<120; frame++) views.RefreshView(1f/60f);
             Require((cameraObject.transform.position-target.transform.position-customOffset).magnitude<.001f,
                 "Adjusted follow offset persists while the drone moves beyond the original warehouse.");
             Require(Vector3.Dot(cameraObject.transform.forward,
@@ -125,6 +139,14 @@ public static class TwoWarehouseCourseVerification
             Require(Mathf.Abs(frame.DepthMetres[8*17+8]-2.95f)<.001f,
                 "Depth measures a collision-only surface at calibrated optical distance.");
             Require(float.IsNaN(frame.DepthMetres[1]),"Unsampled depth pixels remain unknown.");
+            var stamp = DroneCameraMessages.UtcStamp();
+            var depthOnly = DroneCameraMessages.BuildDepth(frame,camera,root.transform.position,
+                Quaternion.identity,1,stamp,ForwardObstacleCamera.OpticalFrame);
+            Require(depthOnly.Rgb==null && depthOnly.Depth.encoding=="32FC1" &&
+                    depthOnly.Depth.header.stamp==depthOnly.Calibration.header.stamp &&
+                    depthOnly.Depth.header.stamp==depthOnly.CameraPose.header.stamp &&
+                    depthOnly.Depth.header.stamp==depthOnly.DronePose.header.stamp,
+                "Physics depth has no fabricated RGB and retains matching acquisition stamps.");
             box.isTrigger = true;
             Physics.SyncTransforms();
             PhysicsObstacleDepth.Measure(frame,camera,root.transform);
@@ -137,6 +159,84 @@ public static class TwoWarehouseCourseVerification
             UnityEngine.Object.DestroyImmediate(obstacle);
             UnityEngine.Object.DestroyImmediate(cameraObject);
             UnityEngine.Object.DestroyImmediate(root);
+        }
+    }
+
+    [Serializable]
+    class TrajectoryFixturePacket
+    {
+        public int reset_sequence, sequence;
+        public bool stop, restart;
+        public long issued_ms = 100000, expires_ms = 100200;
+        public float speed = 2;
+        public Vector3 start, end;
+    }
+
+    // Deterministic checks exercise the real executor with an explicit clock.
+    public static void VerifyNavigationSmoothness()
+    {
+        UnityEditor.SceneManagement.EditorSceneManager.OpenScene(TwoWarehouseCourseBuilder.ScenePath);
+        VerifyCourseSpectatorControls();
+        VerifyObstacleDepth();
+        var course = UnityEngine.Object.FindAnyObjectByType<WarehouseCourse>();
+        var executor = course.GetComponent<DroneCommandSubscriber>();
+        typeof(WarehouseCourse).GetMethod("Awake",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(course,null);
+        Vector3 saved = executor.transform.position;
+        Vector3 origin = new Vector3(-100,100,-100);
+        Vector3 Ros(Vector3 value) => new Vector3(value.x,value.z,value.y);
+        void Packet(int sequence, bool restart, Vector3 start, Vector3 end, bool stop=false, int epochOffset=0)
+        {
+            executor.ApplyApprovedTrajectory(JsonUtility.ToJson(new TrajectoryFixturePacket {
+                reset_sequence=course.ResetSequence+epochOffset, sequence=sequence,
+                restart=restart, start=Ros(start), end=Ros(end), stop=stop }),100000);
+        }
+        try
+        {
+            executor.transform.position=origin;
+            executor.ResetForTrial();
+            Packet(1,false,origin,origin,true);
+            Packet(2,true,origin,origin+Vector3.right*.1f);
+            executor.AdvanceTrajectory(.025f,100025);
+            Require(Vector3.Distance(executor.transform.position,origin+Vector3.right*.05f)<.0001f,
+                "Approved movement is interpolated at the requested speed.");
+            Packet(3,false,origin+Vector3.right*.1f,origin+new Vector3(.1f,0,.1f));
+            executor.AdvanceTrajectory(.05f,100075);
+            Require(Vector3.Distance(executor.transform.position,origin+new Vector3(.1f,0,.05f))<.0001f,
+                "Queued movement follows both legs of a corner without a shortcut.");
+            Vector3 expiredPosition=executor.transform.position;
+            executor.AdvanceTrajectory(.1f,100200);
+            Require(executor.transform.position==expiredPosition &&
+                    executor.TrajectoryStatusJson(100200).Contains("\"stopped\":true"),
+                "Expiry cancels movement and reports a stationary recovery anchor.");
+            Packet(4,true,expiredPosition+Vector3.right*.01f,expiredPosition+Vector3.right*.1f);
+            executor.AdvanceTrajectory(.05f,100050);
+            Require(executor.transform.position==expiredPosition,
+                "A restart from delayed feedback cannot create an unapproved connector.");
+            Packet(5,false,expiredPosition,expiredPosition,true);
+            Packet(6,true,expiredPosition,expiredPosition+Vector3.right*.1f,epochOffset:1);
+            executor.AdvanceTrajectory(.05f,100050);
+            Require(executor.transform.position==expiredPosition,"Wrong-reset packets never move the drone.");
+            Packet(6,true,expiredPosition,expiredPosition+Vector3.right*.1f);
+            Packet(8,false,expiredPosition+Vector3.right*.1f,expiredPosition+Vector3.right*.2f);
+            executor.AdvanceTrajectory(.05f,100050);
+            Require(executor.transform.position==expiredPosition,"Sequence gaps cancel the pending chain.");
+            Packet(9,false,expiredPosition,expiredPosition,true);
+            Packet(10,true,expiredPosition,expiredPosition+Vector3.right*.2f);
+            Packet(11,false,expiredPosition+Vector3.right*.2f,expiredPosition+Vector3.right*.3f);
+            executor.AdvanceTrajectory(.05f,100050);
+            Require(executor.transform.position==expiredPosition,"Outstanding approved distance stays bounded.");
+            Packet(12,false,expiredPosition,expiredPosition,true);
+            Packet(13,true,expiredPosition,expiredPosition+Vector3.right*.1f);
+            executor.ResetForTrial();
+            executor.AdvanceTrajectory(.05f,100050);
+            Require(executor.transform.position==expiredPosition,"Physical reset clears pending interpolation.");
+            Debug.Log("NAVIGATION_SMOOTHNESS_CHECKS_PASS");
+        }
+        finally
+        {
+            executor.ResetForTrial();
+            executor.transform.position=saved;
+            Physics.SyncTransforms();
         }
     }
 

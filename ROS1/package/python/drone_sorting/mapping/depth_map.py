@@ -110,7 +110,9 @@ class LocalDepthMap:
         return tuple(math.floor(value/self.settings.resolution) for value in point)
 
     def _inside(self, cell):
-        return all(low <= value <= high for value, (low, high) in zip(cell, self.bounds))
+        x, y, z = cell
+        (x0, x1), (y0, y1), (z0, z1) = self.bounds
+        return x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1
 
     def _ray_cells(self, start, end):
         """Voxel traversal, stepping tied axes together at an edge/corner."""
@@ -198,8 +200,14 @@ class LocalDepthMap:
         # Queries always apply evidence ages. While stationary, pruning storage
         # need not repeat on every image; a changed window still prunes at once.
         if moved_window or self.last_prune is None or now-self.last_prune >= .5:
-            self.cells = {cell:times for cell,times in self.cells.items()
-                          if self._inside(cell) and 0 <= now-max(times) <= s.maximum_age}
+            # Inline the fixed three-axis window test in this large storage pass.
+            # Avoid a Python generator and function call for every retained voxel.
+            (x0, x1), (y0, y1), (z0, z1) = bounds
+            maximum_age = s.maximum_age
+            self.cells = {cell: times for cell, times in self.cells.items()
+                          if x0 <= cell[0] <= x1 and y0 <= cell[1] <= y1
+                          and z0 <= cell[2] <= z1
+                          and 0 <= now - (times[0] if times[0] > times[1] else times[1]) <= maximum_age}
             self.last_prune = now
         points, depths, hits = observation.sampled_rays(s.pixel_stride, s.clear_range_evidence)
         camera = np.asarray(observation.position)
@@ -207,7 +215,9 @@ class LocalDepthMap:
         fractions = (depths[valid_free]-s.surface_margin)/depths[valid_free]
         endpoints = camera + (points[valid_free]-camera)*fractions[:, None]
         for cell in self._free_ray_cells(camera, endpoints):
-            self._mark(cell, observation.stamp, occupied=False)
+            # Batch traversal already clipped these cells to the current bounds.
+            times = self.cells.setdefault(cell, [-math.inf, -math.inf])
+            times[0] = observation.stamp
         for point, optical_depth, hit in zip(points, depths, hits):
             if not hit:
                 continue

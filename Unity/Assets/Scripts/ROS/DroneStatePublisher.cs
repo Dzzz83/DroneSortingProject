@@ -8,7 +8,7 @@ public class DroneStatePublisher : MonoBehaviour
     private string topicName = DroneRosTopics.CurrentPosition;
 
     [SerializeField]
-    private float publishRate = 0.2f;
+    private float publishRate = 0.05f;
 
     private ROSConnection ros;
     private float timeElapsed;
@@ -19,9 +19,10 @@ public class DroneStatePublisher : MonoBehaviour
         ros.RegisterPublisher<PointMsg>(topicName);
     }
 
-    void Update()
+    void LateUpdate()
     {
-        timeElapsed += Time.deltaTime;
+        // Wall-clock cadence; send one real pose, never catch-up duplicates.
+        timeElapsed += Time.unscaledDeltaTime;
 
         if (timeElapsed >= publishRate)
         {
@@ -35,7 +36,8 @@ public class DroneStatePublisher : MonoBehaviour
 
             ros.Publish(topicName, position);
 
-            timeElapsed = 0f;
+            // Keep fractional frame time without sending catch-up duplicates.
+            timeElapsed %= publishRate;
         }
     }
 }

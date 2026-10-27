@@ -4,7 +4,7 @@ import math
 
 import rospy
 from geometry_msgs.msg import Point
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from drone_sorting.interfaces import ros_topics as topics
 
 
@@ -31,6 +31,10 @@ class NavigationDemo:
         self.state, self.reason = 'WAITING', 'waiting_for_unity'
         self.target_publisher = rospy.Publisher(topics.TARGET_POSITION, Point, queue_size=1)
         self.status_publisher = rospy.Publisher(topics.NAVIGATION_STATUS, String, queue_size=1, latch=True)
+        # This workflow has no package detector; avoid unused GPU capture/readback.
+        self.package_camera_publisher = rospy.Publisher(
+            topics.PACKAGE_CAMERA_ENABLED, Bool, queue_size=1, latch=True)
+        self.package_camera_publisher.publish(Bool(False))
         self.reset_publisher = rospy.Publisher(topics.COURSE_RESET, String, queue_size=1)
         rospy.Subscriber(topics.CURRENT_POSITION, Point, self.receive_position, queue_size=1)
         rospy.Subscriber(topics.COURSE_OBSERVATIONS, String, self.receive_course, queue_size=1)

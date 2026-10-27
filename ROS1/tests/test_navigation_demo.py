@@ -28,6 +28,10 @@ class NavigationDemoTests(unittest.TestCase):
         self.node.receive_course(String(json.dumps(dict(reset_sequence=sequence,collision_observed=contact))))
         self.node.receive_position(Point(*position))
 
+    def test_navigation_explicitly_pauses_unused_package_camera(self):
+        from drone_sorting.interfaces import ros_topics as topics
+        self.assertFalse(self.pubs[topics.PACKAGE_CAMERA_ENABLED].publish.call_args[0][0].data)
+
     def test_waits_for_feedback_and_requires_sustained_physical_arrival(self):
         self.assertEqual(self.node.tick(10)['state'],'WAITING')
         self.feedback()

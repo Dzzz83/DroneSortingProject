@@ -14,6 +14,7 @@ PACKAGE_ACTION_STATUS = "/drone/package_action_status"
 
 MISSION_STATE = "/drone/mission_state"
 
+PACKAGE_CAMERA_ENABLED = "/drone/camera/enabled"
 RGB_IMAGE = "/drone/camera/rgb/image_raw"
 DEPTH_IMAGE = "/drone/camera/depth/image_raw"
 CAMERA_INFO = "/drone/camera/camera_info"
@@ -47,3 +48,8 @@ COURSE_OBSERVATIONS = "/drone/course/observations"
 COURSE_RESET = "/drone/course/reset"
 # ROS-only navigation coordinator status; Unity does not consume it.
 NAVIGATION_STATUS = "/drone/navigation/status"
+
+# Navigation-only ordered, expiring movement approvals (std_msgs/String JSON).
+APPROVED_TRAJECTORY = "/drone/approved_trajectory"
+
+TRAJECTORY_STATUS = "/drone/trajectory_status"

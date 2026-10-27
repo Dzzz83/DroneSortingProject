@@ -40,6 +40,110 @@ class ControlLoopTests(unittest.TestCase):
         with patch.object(rospy, "get_time", return_value=now):
             node._speed_callback(Float32(value))
 
+    def smooth_controller(self):
+        with patch("drone_sorting.control.depth_navigation.DepthNavigation"):
+            node = self.controller(dynamic=False, **{
+                "~avoidance_mode": "depth", "~depth_smooth_trajectory_enabled": True})
+        node.depth_navigation.reset_sequence = 1
+        node.depth_reset_seen = 1
+        return node
+
+    def trajectory_status(self, node, sequence, stopped=True, x=0, now=100, epoch=1):
+        from std_msgs.msg import String
+        with patch.object(rospy, "get_time", return_value=now):
+            node._trajectory_status_callback(String(data=json.dumps({
+                "reset_sequence": epoch, "sequence": sequence, "stopped": stopped,
+                "stamp_ms": now * 1000, "position": {"x": x, "y": 0, "z": 6}})))
+
+    def test_smooth_initial_sync_requires_matching_stop_acknowledgement(self):
+        node = self.smooth_controller()
+        self.update(node)
+        stop = json.loads(node.trajectory_publisher.publish.call_args[0][0].data)
+        self.assertTrue(stop["stop"])
+        self.trajectory_status(node, stop["sequence"] - 1, x=.02)
+        self.update(node)
+        self.assertIsNotNone(node.trajectory_stop_sequence)
+        self.trajectory_status(node, stop["sequence"], x=.03)
+        self.update(node)
+        self.assertIsNone(node.trajectory_stop_sequence)
+        self.assertEqual(node.command_position.x, .03)
+        node.depth_navigation.tick.assert_not_called()
+
+    def test_smooth_stop_does_not_rewind_to_delayed_position(self):
+        node = self.smooth_controller()
+        node.trajectory_needs_sync = False
+        node.trajectory_stream.move((0, 0, 6), (.1, 0, 6), 1, 2, 100,
+                                    {"stamp": 100, "observation_stamp": 100})
+        node.command_position = Point(.1, 0, 6)
+        node._stop_trajectory()
+        self.assertEqual(node.command_position.x, .1)
+        self.trajectory_status(node, node.trajectory_stop_sequence, x=.075)
+        self.assertFalse(node._trajectory_ready(100))
+        self.assertEqual(node.command_position.x, .075)
+
+    def test_smooth_local_rejection_triggers_stop_and_recovery(self):
+        node = self.smooth_controller()
+        node.trajectory_needs_sync = False
+        node.trajectory_stream.move((0, 0, 6), (.1, 0, 6), 1, 2, 100,
+                                    {"stamp": 100, "observation_stamp": 100})
+        node.trajectory_first_move = 1
+        self.trajectory_status(node, 1)
+        self.assertFalse(node._trajectory_ready(100))
+        self.assertEqual(node.trajectory_stop_sequence, 2)
+
+    def test_smooth_candidate_lead_wait_recovers_when_feedback_stalls(self):
+        node = self.smooth_controller()
+        node.trajectory_stream.move((0, 0, 6), (.2, 0, 6), 1, 2, 100,
+                                    {"stamp": 100, "observation_stamp": 100})
+        node.command_position = Point(.2, 0, 6)
+        node.position_progress_at = 99
+        node.depth_navigation.tick.return_value = Mock(state="MOVE", next_position=(.3, 0, 6))
+        node._update_depth_command(100)
+        self.assertIsNotNone(node.trajectory_stop_sequence)
+        self.assertEqual(node.command_position.x, .2)
+
+    def test_smooth_short_window_waits_without_rewind_or_stop(self):
+        node = self.smooth_controller()
+        node.trajectory_stream.move((0,0,6),(.1,0,6),1,2,100,
+                                    {"stamp":100,"observation_stamp":100})
+        node.command_position = Point(.1,0,6)
+        node.depth_navigation.tick.return_value = Mock(state="MOVE",next_position=(.125,0,6))
+        node.depth_navigation.follower.status = {"stamp":99.7,"observation_stamp":99.7}
+        node._update_depth_command(100)
+        node.trajectory_publisher.publish.assert_not_called()
+        self.assertEqual(node.command_position.x,.1)
+        self.assertEqual(node.trajectory_stream.sequence,1)
+        self.assertIsNone(node.trajectory_stop_sequence)
+
+    def test_frontier_at_goal_does_not_cancel_still_approved_queued_motion(self):
+        node = self.smooth_controller()
+        node.trajectory_stream.move((0,0,6),(.1,0,6),1,2,100,
+                                    {"stamp":100,"observation_stamp":100})
+        node.depth_navigation.tick.return_value = Mock(state="HOLD",reason="local_goal_reached")
+        node._update_depth_command(100)
+        node.trajectory_publisher.publish.assert_not_called()
+        self.assertTrue(node.trajectory_stream.in_motion)
+        node.depth_navigation.tick.return_value = Mock(state="HOLD",reason="route_plan_stale")
+        node._update_depth_command(100)
+        self.assertIsNotNone(node.trajectory_stop_sequence)
+
+    def test_configured_fifty_hz_keeps_requested_speed_with_smaller_steps(self):
+        node = self.controller(dynamic=False, **{"~speed":2.,"~update_rate":50.})
+        self.update(node)
+        self.assertAlmostEqual(node.command_position.x,.04)
+        for rate in (0,float("nan"),101):
+            with self.subTest(rate=rate), self.assertRaises(ValueError):
+                self.controller(**{"~update_rate":rate})
+
+    def test_smooth_wrong_epoch_and_stale_ack_cannot_restart(self):
+        node = self.smooth_controller()
+        self.update(node)
+        self.trajectory_status(node, node.trajectory_stop_sequence, epoch=0)
+        self.assertFalse(node._trajectory_ready(100))
+        self.trajectory_status(node, node.trajectory_stop_sequence)
+        self.assertFalse(node._trajectory_ready(101))
+        self.assertIsNotNone(node.trajectory_stop_sequence)
+
     def test_phase_uses_current_mission_status_and_ignores_malformed_payloads(self):
         from std_msgs.msg import String
         node = self.controller()

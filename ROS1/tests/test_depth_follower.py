@@ -69,8 +69,18 @@ class DepthFollowerTests(unittest.TestCase):
         self.follower.reset()
         self.assertEqual(self.decide().reason,"awaiting_approved_path")
 
+    def test_normal_progress_along_fresh_route_does_not_invalidate_its_start(self):
+        decision = self.decide(command=(.7,0,1), observed=(.6,0,1))
+        self.assertEqual(decision.state,"MOVE",decision.reason)
+        self.assertAlmostEqual(decision.next_position[0],.8)
+        self.assertEqual(self.decide(command=(1,.6,1),observed=(1,.5,1)).state,"MOVE")
+        self.assertEqual(self.decide(command=(.7,0,1),observed=(.6,.36,1)).reason,
+                         "route_pose_mismatch")
+        self.assertEqual(self.decide(command=(.7,0,1),observed=(.6,0,1),now=10.4).reason,
+                         "route_plan_stale")
+
     def test_pose_mismatch_and_invalid_path_fail_closed(self):
-        self.assertEqual(self.decide(observed=(2,2,1)).reason,"route_start_mismatch")
+        self.assertEqual(self.decide(observed=(2,2,1)).reason,"route_pose_mismatch")
         self.follower.receive_path(((0,0,float('nan')), (1,1,1)), 10)
         self.assertEqual(self.decide().state,"HOLD")
 

@@ -18,7 +18,9 @@
         <param name="speed" value="$(arg speed)" />
         <param name="position_timeout" value="0.5" />
         <param name="target_timeout" value="0.5" />
+        <param name="update_rate" value="50.0" />
         <param name="maximum_command_lead" value="0.25" />
+        <param name="depth_smooth_trajectory_enabled" value="true" />
         <param name="depth_allow_vertical" value="true" />
         <param name="depth_autonomous_goals" value="true" />
     </node>

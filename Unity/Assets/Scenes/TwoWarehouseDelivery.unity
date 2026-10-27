@@ -684186,7 +684186,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneStatePublisher
   topicName: /drone/current_position
-  publishRate: 0.2
+  publishRate: 0.05
 --- !u!114 &2042285848
 MonoBehaviour:
   m_ObjectHideFlags: 0
