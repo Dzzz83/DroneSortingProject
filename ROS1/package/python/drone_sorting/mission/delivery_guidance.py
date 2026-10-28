@@ -112,40 +112,60 @@ class DeliveryGuidance(PickupGuidance):
             return self.access_command(position, now)
         if self.phase not in self.DELIVERY_PHASES:
             command = super().tick(position, now)
-            if self.phase == "VERIFIED":
-                # Pickup has reached its lift target. Ascend vertically before lateral travel.
-                self.carry_start = (position[0], position[1], self.delivery.carry_height)
-                self.transition("CARRY_ASCEND", now)
-                command["phase"] = self.phase
-                command["target"], command["speed"] = position, 0.0
-            return command
+            if self.phase != "VERIFIED":
+                return command
 
+            # Pickup has reached its lift target. Pause this tick, then ascend
+            # vertically to carry height before allowing lateral travel.
+            self.carry_start = (position[0], position[1], self.delivery.carry_height)
+            self.transition("CARRY_ASCEND", now)
+            return self._hold_command(position)
+
+        return self.delivery_command(position, now)
+
+    def _hold_command(self, position):
+        return {"target": position, "speed": 0.0, "action": "",
+                "phase": self.phase, "reason": self.reason}
+
+    def delivery_command(self, position, now):
         settings = self.delivery
-        target, speed, action = position, 0.0, ""
         elapsed = now - self.phase_started
         if self.phase == "COMPLETE":
-            pass
-        elif self.phase == "SETTLE":
+            return self._hold_command(position)
+        if self.phase == "SETTLE":
             # DROP_DONE confirms release, not placement. The physical evaluator checks settling.
             if elapsed >= settings.settle_time:
                 self.transition("COMPLETE", now)
-        elif elapsed > (settings.drop_timeout if self.phase == "WAIT_FOR_DROP" else settings.travel_timeout):
-            self.transition("FAILED", now, "drop_timeout" if self.phase == "WAIT_FOR_DROP" else "delivery_timeout")
-        elif self.phase == "WAIT_FOR_DROP":
-            pass
+            return self._hold_command(position)
+        if self.phase == "WAIT_FOR_DROP":
+            if elapsed > settings.drop_timeout:
+                self.transition("FAILED", now, "drop_timeout")
+            return self._hold_command(position)
+        if elapsed > settings.travel_timeout:
+            self.transition("FAILED", now, "delivery_timeout")
+            return self._hold_command(position)
+
+        if self.phase == "CARRY_ASCEND":
+            target = self.carry_start
+            speed = settings.carry_speed
+            next_phase = "CARRY"
+        elif self.phase == "CARRY":
+            target = (settings.dropoff_x, settings.dropoff_y, settings.carry_height)
+            speed = settings.carry_speed
+            next_phase = "LOWER"
+        elif self.phase == "LOWER":
+            target = (settings.dropoff_x, settings.dropoff_y, settings.release_height)
+            speed = settings.lowering_speed
+            next_phase = "WAIT_FOR_DROP"
         else:
-            if self.phase == "CARRY_ASCEND":
-                target, speed, next_phase = self.carry_start, settings.carry_speed, "CARRY"
-            elif self.phase == "CARRY":
-                target = (settings.dropoff_x, settings.dropoff_y, settings.carry_height)
-                speed, next_phase = settings.carry_speed, "LOWER"
-            else:
-                target = (settings.dropoff_x, settings.dropoff_y, settings.release_height)
-                speed, next_phase = settings.lowering_speed, "WAIT_FOR_DROP"
-            if distance(position, target) <= self.settings.arrival_tolerance:
-                self.transition(next_phase, now)
-                target, speed = position, 0.0
-                if next_phase == "WAIT_FOR_DROP":
-                    action = "DROP"
+            raise ValueError("Unexpected delivery phase: " + self.phase)
+
+        action = ""
+        if distance(position, target) <= self.settings.arrival_tolerance:
+            self.transition(next_phase, now)
+            target = position
+            speed = 0.0
+            if next_phase == "WAIT_FOR_DROP":
+                action = "DROP"
         return {"target": target, "speed": speed, "action": action,
                 "phase": self.phase, "reason": self.reason}

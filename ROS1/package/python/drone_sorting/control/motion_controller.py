@@ -11,6 +11,8 @@ from drone_sorting.control.approved_trajectory import ApprovedTrajectoryStream, 
 
 
 class MotionController:
+    TRAJECTORY_STOP_RETRY_INTERVAL = .25
+
     def __init__(self):
         self.speed = float(rospy.get_param("~speed", 2.0))
         if not math.isfinite(self.speed) or self.speed <= 0:
@@ -66,6 +68,8 @@ class MotionController:
         self.trajectory_status = None
         self.trajectory_status_received = None
         self.trajectory_stop_sequence = None
+        self.trajectory_stop_packet = None
+        self.trajectory_stop_sent = None
         self.trajectory_needs_sync = True
         self.trajectory_first_move = None
         if self.use_approved_trajectories:
@@ -184,25 +188,29 @@ class MotionController:
         if self.depth_navigation.reset_sequence is None:
             return False
         if self.trajectory_needs_sync and self.trajectory_stop_sequence is None:
-            self._stop_trajectory(force=True)
+            self._stop_trajectory(force=True, now=now)
         status = self.trajectory_status
         if (status is None or status["reset_sequence"] != self.depth_navigation.reset_sequence
                 or self._feedback_expired(self.trajectory_status_received, .5, now)
                 or not 0 <= now - status["stamp_ms"] / 1000.0 <= .5):
-            self._stop_trajectory()
+            self._stop_trajectory(now=now)
             return False
         if self.trajectory_stop_sequence is not None:
             if status["stopped"] and status["sequence"] == self.trajectory_stop_sequence:
                 position = status["position"]
                 self.command_position = Point(position["x"], position["y"], position["z"])
                 self.trajectory_stop_sequence = None
+                self.trajectory_stop_packet = None
+                self.trajectory_stop_sent = None
                 self.trajectory_needs_sync = False
                 self.trajectory_first_move = None
+            else:
+                self._stop_trajectory(now=now)
             return False
         if (self.trajectory_stream.in_motion and status["stopped"]
                 and self.trajectory_first_move is not None
                 and status["sequence"] >= self.trajectory_first_move):
-            self._stop_trajectory()
+            self._stop_trajectory(now=now)
             return False
         return True
 
@@ -253,10 +261,19 @@ class MotionController:
 
         sensors = self._parse_lateral_sensors()
         front = sensors["F"]
-        right = sensors["R"]
 
         def is_blocked(dist, threshold):
             return 0.0 <= dist <= threshold
+
+        front_blocked = is_blocked(front, self.safe_distance)
+        # A latched turn can become blocked while following the wall. Check it
+        # before gap-width or divergence logic can return another movement.
+        if self.bypass_direction is not None:
+            side = "R" if self.bypass_direction == "RIGHT" else "L"
+            if is_blocked(sensors[side], self.safe_distance):
+                self.bypass_direction = None
+                self.gap_start_position = None
+                self.closest_target_dist = float("inf")
 
         # Current 2D distance to target
         dx_t = self.target_position.x - self.command_position.x
@@ -275,10 +292,11 @@ class MotionController:
                 self.bypass_direction = None
                 self.gap_start_position = None
                 self.closest_target_dist = float("inf")
-                return "FORWARD"
+                if not front_blocked:
+                    return "FORWARD"
 
             # Check if front is clear
-            if not (is_blocked(front, self.safe_distance)):
+            if self.bypass_direction is not None and not front_blocked:
                 if self.gap_start_position is None:
                     self.gap_start_position = Point(
                         x=self.command_position.x,
@@ -299,18 +317,18 @@ class MotionController:
                 self.closest_target_dist = float("inf")
                 return "FORWARD"
 
-            self.gap_start_position = None
-            return self.bypass_direction
+            if self.bypass_direction is not None:
+                self.gap_start_position = None
+                return self.bypass_direction
 
         # Prefer the right side when starting a bypass.
-        if is_blocked(front, self.safe_distance):
-            right_blocked = is_blocked(right, self.safe_distance)
-
-            # Turn RIGHT by default unless right side is blocked
-            if not right_blocked:
+        if front_blocked:
+            if not is_blocked(sensors["R"], self.safe_distance):
                 self.bypass_direction = "RIGHT"
-            else:
+            elif not is_blocked(sensors["L"], self.safe_distance):
                 self.bypass_direction = "LEFT"
+            else:
+                return "HOLD"
 
             self.closest_target_dist = curr_target_dist
             self.gap_start_position = None
@@ -344,6 +362,8 @@ class MotionController:
                     self.trajectory_stream.reset(sequence)
                     self.trajectory_needs_sync = True
                     self.trajectory_stop_sequence = None
+                    self.trajectory_stop_packet = None
+                    self.trajectory_stop_sent = None
                     self.trajectory_first_move = None
                     self.trajectory_status = None
         now = rospy.get_time()
@@ -353,21 +373,21 @@ class MotionController:
             return
         if (self._feedback_expired(self.position_received, self.position_timeout, now)
                 or self._feedback_expired(self.target_received, self.target_timeout, now)):
-            self._stop_trajectory()
+            self._stop_trajectory(now=now)
             return
         if self.enable_dynamic_speed and (self.speed_received is None
                 or self._feedback_expired(self.speed_received, self.speed_timeout, now)):
-            self._stop_trajectory()
+            self._stop_trajectory(now=now)
             return
         # Unity holds its last applied position. Do not publish lagging feedback
         # as a hold command, which could move the drone backward.
         if self.speed == 0:
-            self._stop_trajectory()
+            self._stop_trajectory(now=now)
             return
         if not self._within_feedback_limit(self.command_position):
             if (self.trajectory_stream is not None and self.position_progress_at is not None
                     and now - self.position_progress_at > .25):
-                self._stop_trajectory()
+                self._stop_trajectory(now=now)
             self._log_status("WAIT_FOR_FEEDBACK")
             return
 
@@ -437,13 +457,13 @@ class MotionController:
             # queued segments. Let those existing approvals finish; stopping here
             # cancels the last part of every local leg and forces a restart.
             if result.reason != "local_goal_reached":
-                self._stop_trajectory()
+                self._stop_trajectory(now=now)
             self._log_status("DEPTH_HOLD: " + result.reason)
             return  # Unity stops pending segments, not just new publication.
         approved = Point(*result.next_position)
         if not self._within_feedback_limit(approved):
             if (self.position_progress_at is not None and now - self.position_progress_at > .25):
-                self._stop_trajectory()
+                self._stop_trajectory(now=now)
             self._log_status("WAIT_FOR_FEEDBACK")
             return
         if self.trajectory_stream is not None:
@@ -463,7 +483,7 @@ class MotionController:
                 self._log_status("WAIT_FOR_APPROVAL_WINDOW")
                 return  # Existing segments retain their original expiry; never extend it.
             except ValueError:
-                self._stop_trajectory()
+                self._stop_trajectory(now=now)
                 return
             if self.trajectory_first_move is None:
                 self.trajectory_first_move = self.trajectory_stream.sequence
@@ -473,24 +493,36 @@ class MotionController:
         self.command_position = approved
         self._log_status("DEPTH_APPROVED")
 
-    def _stop_trajectory(self, force=False):
+    def _stop_trajectory(self, force=False, now=None):
         """Cancel pending motion, then wait for the applied stop acknowledgement.
 
         Reanchoring from ordinary feedback here would race the remaining Unity
         queue. Only _trajectory_ready may anchor, after the stop is acknowledged.
         """
-        if self.trajectory_stream is None or self.trajectory_stop_sequence is not None:
+        if self.trajectory_stream is None:
             return
-        sequence = self.depth_navigation.reset_sequence
-        if sequence is None:
-            return
-        packet = self.trajectory_stream.stop(sequence, force=force)
-        if packet is not None:
+        if self.trajectory_stop_sequence is None:
+            sequence = self.depth_navigation.reset_sequence
+            if sequence is None:
+                return
+            packet = self.trajectory_stream.stop(sequence, force=force)
+            if packet is None:
+                return
             self.trajectory_stop_sequence = self.trajectory_stream.sequence
+            self.trajectory_stop_packet = packet
+            self.trajectory_stop_sent = None
             self.trajectory_needs_sync = True
-            self.trajectory_publisher.publish(String(data=packet))
+        # An unlatched publication can be lost during connection setup/recovery.
+        # Retry the same identity: Unity ignores duplicates and repeats its status.
+        now = rospy.get_time() if now is None else now
+        sent = self.trajectory_stop_sent
+        if sent is None or now < sent or now-sent >= self.TRAJECTORY_STOP_RETRY_INTERVAL:
+            self.trajectory_publisher.publish(String(data=self.trajectory_stop_packet))
+            self.trajectory_stop_sent = now
 
     def _movement_direction(self, decision, target_direction):
+        if decision == "HOLD":
+            return None
         if decision == "FORWARD":
             return target_direction
 

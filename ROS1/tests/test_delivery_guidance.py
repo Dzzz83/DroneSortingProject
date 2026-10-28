@@ -67,6 +67,37 @@ class DeliveryGuidanceTests(unittest.TestCase):
         self.assertEqual(command["reason"], "delivery_timeout")
         self.assertEqual(command["speed"], 0)
 
+    def test_timeouts_allow_the_deadline_but_fail_after_it(self):
+        node = self.at_release()
+        position = (12, 55, 1.4)
+        node.tick(position, 104)
+        waiting = node.tick(position, 109)
+        self.assertEqual(waiting["phase"], "WAIT_FOR_DROP")
+        self.assertEqual(waiting["speed"], 0)
+        self.assertEqual(waiting["action"], "")
+        self.assertEqual(node.tick(position, 109.01)["reason"], "drop_timeout")
+
+        node = self.lifted()
+        moving = node.tick((32.8, 24, 3), 221)
+        self.assertEqual(moving["phase"], "CARRY_ASCEND")
+        self.assertGreater(moving["speed"], 0)
+        self.assertEqual(node.tick((32.8, 24, 3), 221.01)["reason"], "delivery_timeout")
+
+    def test_failed_pickup_remains_stopped_without_starting_delivery(self):
+        node = DeliveryGuidance()
+        node.transition("WAIT_FOR_PICKUP", 100)
+        position = (34, 25, 1.4)
+        failure = node.tick(position, 106)
+        self.assertEqual(failure["phase"], "FAILED")
+        self.assertEqual(failure["reason"], "phase_timeout")
+        node.acknowledge("PICKUP_DONE", 107)
+        stopped = node.tick(position, 108)
+        self.assertEqual(stopped, failure)
+        self.assertEqual(stopped["target"], position)
+        self.assertEqual(stopped["speed"], 0)
+        self.assertEqual(stopped["action"], "")
+        self.assertIsNone(node.carry_start)
+
     def test_perception_after_pickup_cannot_move_the_locked_center(self):
         node = self.lifted()
         node.observe({"state": "DETECTIONS", "frame_id": "warehouse", "stamp": {"secs": 102, "nsecs": 0},

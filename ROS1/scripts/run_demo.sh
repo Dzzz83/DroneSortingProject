@@ -72,6 +72,7 @@ check_dependencies() {
     check_unity_assets
     validate_camera_workspace
     select_ros_environment
+    check_ros_python_dependencies
 }
 
 check_available_resources() {

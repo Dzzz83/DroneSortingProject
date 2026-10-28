@@ -75,11 +75,91 @@ class ControlLoopTests(unittest.TestCase):
         node.trajectory_stream.move((0, 0, 6), (.1, 0, 6), 1, 2, 100,
                                     {"stamp": 100, "observation_stamp": 100})
         node.command_position = Point(.1, 0, 6)
-        node._stop_trajectory()
+        node._stop_trajectory(now=100)
         self.assertEqual(node.command_position.x, .1)
         self.trajectory_status(node, node.trajectory_stop_sequence, x=.075)
         self.assertFalse(node._trajectory_ready(100))
         self.assertEqual(node.command_position.x, .075)
+
+    def test_smooth_lost_stop_retries_same_packet_then_recovers_from_ack(self):
+        node = self.smooth_controller()
+        self.update(node)
+        original = node.trajectory_publisher.publish.call_args[0][0].data
+        self.trajectory_status(node, 0, now=100.1)
+        self.update(node, 100.1)
+        self.assertEqual(node.trajectory_publisher.publish.call_count, 1)
+        self.trajectory_status(node, 0, now=100.6)
+        self.update(node, 100.6)
+        self.assertEqual(node.trajectory_publisher.publish.call_count, 2)
+        self.assertEqual(node.trajectory_publisher.publish.call_args[0][0].data, original)
+        self.assertEqual(node.trajectory_stream.sequence, 1)
+        node.depth_navigation.tick.assert_not_called()
+        # A lost acknowledgement also keeps the same pending stop identity.
+        self.update(node, 101.2)
+        self.assertEqual(node.trajectory_publisher.publish.call_count, 3)
+        self.assertEqual(node.trajectory_publisher.publish.call_args[0][0].data, original)
+        self.trajectory_status(node, 1, x=.075, now=101.3)
+        self.update(node, 101.3)
+        self.assertIsNone(node.trajectory_stop_sequence)
+        self.assertEqual(node.command_position.x, .075)
+        node.trajectory_publisher.reset_mock()
+        with patch.object(node, '_update_depth_command') as advance:
+            node.position_received = node.target_received = 101.4
+            self.update(node, 101.4)
+        advance.assert_called_once()
+        node.trajectory_publisher.publish.assert_not_called()
+
+    def test_smooth_reset_discards_pending_stop_and_rejects_old_ack(self):
+        node = self.smooth_controller()
+        self.update(node)
+        original = node.trajectory_publisher.publish.call_args[0][0].data
+        node.depth_navigation.reset_sequence = 2
+        self.update(node, 100.6)
+        replacement = node.trajectory_publisher.publish.call_args[0][0].data
+        self.assertNotEqual(original, replacement)
+        self.assertEqual(json.loads(replacement)['reset_sequence'], 2)
+        self.trajectory_status(node, 1, now=100.7, epoch=1)
+        self.update(node, 100.7)
+        self.assertIsNotNone(node.trajectory_stop_sequence)
+        self.trajectory_status(node, 1, now=100.8, epoch=2)
+        self.update(node, 100.8)
+        self.assertIsNone(node.trajectory_stop_sequence)
+
+    def heuristic_sensors(self, node, front, left, right):
+        from std_msgs.msg import Float32MultiArray
+        node._obstacle_callback(Float32MultiArray(data=[front, -1, -1, left, right, -1, -1]))
+
+    def test_heuristic_holds_when_front_and_both_sides_are_blocked(self):
+        node = self.controller(dynamic=False, **{'~avoidance_mode': 'heuristic'})
+        self.heuristic_sensors(node, .1, .1, .1)
+        self.update(node)
+        self.assertEqual(node.command_position, Point(0, 0, 6))
+        self.assertIsNone(node.bypass_direction)
+
+    def test_heuristic_selects_only_clear_side_and_keeps_right_preference(self):
+        for left, right, expected in ((-1, -1, 'RIGHT'), (.1, -1, 'RIGHT'), (-1, .1, 'LEFT')):
+            with self.subTest(left=left, right=right):
+                node = self.controller(dynamic=False, **{'~avoidance_mode': 'heuristic'})
+                self.heuristic_sensors(node, .1, left, right)
+                self.update(node)
+                self.assertEqual(node.bypass_direction, expected)
+                self.assertNotEqual(node.command_position, Point(0, 0, 6))
+
+    def test_heuristic_rechecks_latched_side_before_any_further_movement(self):
+        for direction, front in (('LEFT', .1), ('RIGHT', .1), ('LEFT', -1), ('RIGHT', -1)):
+            with self.subTest(direction=direction, front=front):
+                node = self.controller(dynamic=False, **{'~avoidance_mode': 'heuristic'})
+                node.bypass_direction = direction
+                node.closest_target_dist = 0.  # Divergence must not bypass the blocked-side gate.
+                node.max_divergence_dist = .5
+                self.heuristic_sensors(node, front, .1, .1)
+                self.update(node)
+                if front >= 0:
+                    self.assertEqual(node.command_position, Point(0, 0, 6))
+                else:
+                    # Once the front is clear, abandon the blocked bypass.
+                    self.assertIsNone(node.bypass_direction)
+                    self.assertGreater(node.command_position.x, 0)
 
     def test_smooth_local_rejection_triggers_stop_and_recovery(self):
         node = self.smooth_controller()

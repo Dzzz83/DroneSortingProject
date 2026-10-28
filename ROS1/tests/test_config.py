@@ -40,6 +40,28 @@ class LinuxConfigurationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('ROS_ENVIRONMENT must be', result.stderr)
 
+    def test_ros_numpy_check_uses_selected_runner_and_reports_missing_dependency(self):
+        with tempfile.TemporaryDirectory(prefix='ROS project ') as temporary:
+            root = Path(temporary)
+            runner = root / 'selected ROS runner.sh'
+            arguments = root / 'runner arguments'
+            runner.write_text('''#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$CHECK_ARGUMENTS"
+exit "$CHECK_STATUS"
+''')
+            for status in ('0', '1'):
+                with self.subTest(status=status):
+                    result = self.run_config(
+                        temporary, 'ROS_RUNNER=(bash "$CHECK_RUNNER"); check_ros_python_dependencies',
+                        CHECK_RUNNER=str(runner), CHECK_ARGUMENTS=str(arguments), CHECK_STATUS=status)
+                    self.assertEqual(result.returncode == 0, status == '0', result.stderr)
+                    invocation = arguments.read_text()
+                    self.assertIn('/usr/bin/python3', invocation)
+                    self.assertIn('import numpy', invocation)
+                    if status == '1':
+                        self.assertIn('python3-numpy', result.stderr)
+                        self.assertIn('selected ROS environment', result.stderr)
+
     def test_unfetched_lfs_asset_has_actionable_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             asset = Path(temporary) / 'Unity/Assets/model.fbx'

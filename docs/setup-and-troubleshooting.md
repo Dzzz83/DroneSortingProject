@@ -39,12 +39,18 @@ Inside the container, install the build and ROS packages, then return to the hos
 sudo apt-get update
 sudo apt-get install -y build-essential ros-noetic-catkin ros-noetic-message-generation \
   ros-noetic-message-filters ros-noetic-geometry-msgs ros-noetic-sensor-msgs \
-  ros-noetic-std-msgs ros-noetic-tf2-msgs
+  ros-noetic-std-msgs ros-noetic-tf2-msgs python3-numpy
 exit
 ```
 
 Native Noetic users install the same packages in their Ubuntu 20.04 environment
 after installing ROS; they do not need the container commands.
+
+NumPy must be available to ROS's `/usr/bin/python3`, independently of the host
+detector environment. Verify inside the selected ROS environment with
+`/usr/bin/python3 -c "import numpy; print(numpy.__version__)"`. Setup and the run
+commands check this before proceeding. If the check fails, install
+`python3-numpy` there using the commands above, then retry.
 
 The scripts prefer native ROS when `/opt/ros/noetic/setup.bash` exists. Otherwise,
 they use container `ros-noetic`. To override that choice, set `ROS_ENVIRONMENT`

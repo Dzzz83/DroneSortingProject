@@ -13,6 +13,10 @@ YOLO detector and Unity control handlers are unchanged.
   and reachable local-goal selection; see the [README](../README.md#navigation-only-a-to-b-demo).
 - Every candidate cell and traversed segment is accepted only when **all voxels
   intersecting the full configured bounding envelope are currently `free`**.
+  Segment checks cover each interval between envelope-face crossings of voxel
+  planes, including short diagonal corner overlaps. Axis-aligned sweeps use a
+  single volume query. Face-only contact follows the same boundary tolerance as
+  the stationary-envelope diagnostics.
 - `occupied`, `unknown`, stale map/pose, unsupported altitude changes and missing
   goals result in `HOLD` with an explicit reason. No free-ray cell alone certifies
   clearance for the entire vehicle.

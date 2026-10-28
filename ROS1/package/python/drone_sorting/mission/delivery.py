@@ -3,33 +3,94 @@
 import json
 import math
 import threading
-from dataclasses import fields
 
 import rospy
 from geometry_msgs.msg import Point, Vector3
 from std_msgs.msg import Float32, String
 
 from drone_sorting.interfaces import ros_topics
-from drone_sorting.mission.delivery_guidance import DeliveryGuidance, DeliverySettings, ObservationAccessSettings
+from drone_sorting.mission.delivery_guidance import (
+    DeliveryGuidance,
+    DeliverySettings,
+    ObservationAccessSettings,
+)
 from drone_sorting.mission.pickup_guidance import PickupSettings
+
+
+def _read_float_parameter(name: str, default: float, *, positive: bool = False) -> float:
+    value = rospy.get_param("~" + name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Parameter ~" + name + " must be a number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Parameter ~" + name + " must be finite")
+    if positive and number <= 0:
+        raise ValueError("Parameter ~" + name + " must be positive")
+    return number
+
+
+def _read_positive_integer_parameter(name: str, default: int) -> int:
+    value = rospy.get_param("~" + name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("Parameter ~" + name + " must be a positive integer")
+    return value
+
+
+def _load_pickup_settings() -> PickupSettings:
+    defaults = PickupSettings()
+    return PickupSettings(
+        mount_offset=_read_float_parameter("mount_offset", defaults.mount_offset, positive=True),
+        approach_clearance=_read_float_parameter("approach_clearance", defaults.approach_clearance, positive=True),
+        lift_clearance=_read_float_parameter("lift_clearance", defaults.lift_clearance, positive=True),
+        arrival_tolerance=_read_float_parameter("arrival_tolerance", defaults.arrival_tolerance, positive=True),
+        association_radius=_read_float_parameter("association_radius", defaults.association_radius, positive=True),
+        stability_tolerance=_read_float_parameter("stability_tolerance", defaults.stability_tolerance, positive=True),
+        required_observations=_read_positive_integer_parameter("required_observations", defaults.required_observations),
+        maximum_age=_read_float_parameter("maximum_age", defaults.maximum_age, positive=True),
+        observation_timeout=_read_float_parameter("observation_timeout", defaults.observation_timeout, positive=True),
+        loss_timeout=_read_float_parameter("loss_timeout", defaults.loss_timeout, positive=True),
+        phase_timeout=_read_float_parameter("phase_timeout", defaults.phase_timeout, positive=True),
+        pickup_timeout=_read_float_parameter("pickup_timeout", defaults.pickup_timeout, positive=True),
+        approach_speed=_read_float_parameter("approach_speed", defaults.approach_speed, positive=True),
+        descent_speed=_read_float_parameter("descent_speed", defaults.descent_speed, positive=True),
+        lift_speed=_read_float_parameter("lift_speed", defaults.lift_speed, positive=True),
+    )
+
+
+def _load_delivery_settings() -> DeliverySettings:
+    defaults = DeliverySettings()
+    return DeliverySettings(
+        dropoff_x=_read_float_parameter("dropoff_x", defaults.dropoff_x),
+        dropoff_y=_read_float_parameter("dropoff_y", defaults.dropoff_y),
+        release_height=_read_float_parameter("release_height", defaults.release_height),
+        carry_height=_read_float_parameter("carry_height", defaults.carry_height),
+        carry_speed=_read_float_parameter("carry_speed", defaults.carry_speed),
+        lowering_speed=_read_float_parameter("lowering_speed", defaults.lowering_speed),
+        travel_timeout=_read_float_parameter("travel_timeout", defaults.travel_timeout),
+        drop_timeout=_read_float_parameter("drop_timeout", defaults.drop_timeout),
+        settle_time=_read_float_parameter("settle_time", defaults.settle_time),
+    )
+
+
+def _load_access_settings() -> ObservationAccessSettings:
+    defaults = ObservationAccessSettings()
+    return ObservationAccessSettings(
+        observation_x=_read_float_parameter("observation_x", defaults.observation_x),
+        observation_y=_read_float_parameter("observation_y", defaults.observation_y),
+        observation_height=_read_float_parameter("observation_height", defaults.observation_height),
+        access_speed=_read_float_parameter("access_speed", defaults.access_speed),
+        access_timeout=_read_float_parameter("access_timeout", defaults.access_timeout),
+        hover_time=_read_float_parameter("hover_time", defaults.hover_time),
+    )
 
 
 class DeliveryMission:
     def __init__(self):
-        settings = PickupSettings()
-        for field in fields(settings):
-            value = rospy.get_param("~" + field.name, getattr(settings, field.name))
-            if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-                raise ValueError("Invalid pickup parameter: " + field.name)
-            setattr(settings, field.name, value)
-        delivery_defaults = DeliverySettings()
-        delivery_values = {field.name: rospy.get_param("~" + field.name, getattr(delivery_defaults, field.name))
-                           for field in fields(DeliverySettings)}
-        access_defaults = ObservationAccessSettings()
-        access_values = {field.name: rospy.get_param("~" + field.name, getattr(access_defaults, field.name))
-                         for field in fields(ObservationAccessSettings)}
-        self.guidance = DeliveryGuidance(settings, DeliverySettings(**delivery_values),
-                                         ObservationAccessSettings(**access_values))
+        self.guidance = DeliveryGuidance(
+            pickup_settings=_load_pickup_settings(),
+            delivery_settings=_load_delivery_settings(),
+            access_settings=_load_access_settings(),
+        )
         self.lock = threading.Lock()
         self.position = None
         self.position_received = None
@@ -68,6 +129,52 @@ class DeliveryMission:
         with self.lock:
             self.guidance.acknowledge(message.data.strip().upper(), rospy.get_time())
 
+    def report_phase(self, phase, reason):
+        if phase == self.last_phase:
+            return
+
+        rospy.loginfo("Camera pickup phase: %s (%s)", phase, reason or "")
+        if phase in ("ASCEND_TO_OBSERVATION", "APPROACH"):
+            # Access and visual approach both belong to GO_TO_PICKUP.
+            if not self.go_to_pickup_published:
+                self.state.publish(String(data="GO_TO_PICKUP"))
+                self.go_to_pickup_published = True
+        elif phase == "WAIT_FOR_PICKUP":
+            self.state.publish(String(data="WAIT_FOR_PICKUP"))
+        elif phase == "CARRY_ASCEND":
+            self.state.publish(String(data="GO_TO_DROPOFF"))
+        elif phase == "WAIT_FOR_DROP":
+            self.state.publish(String(data="WAIT_FOR_DROP"))
+        elif phase == "COMPLETE":
+            self.state.publish(String(data="COMPLETE"))
+        self.last_phase = phase
+
+    def publish_command(self, command, position, center, now):
+        self.speed.publish(Float32(data=command["speed"]))
+        self.target.publish(Point(*command["target"]))
+
+        delta_x = command["target"][0] - position[0]
+        delta_y = command["target"][1] - position[1]
+        horizontal_distance = math.hypot(delta_x, delta_y)
+        heading = Vector3(0, 0, 0)
+        if horizontal_distance > 0:
+            heading = Vector3(delta_x / horizontal_distance, delta_y / horizontal_distance, 0)
+        self.heading.publish(heading)
+
+        if command["action"] != self.last_action:
+            self.action.publish(String(data=command["action"]))
+            self.last_action = command["action"]
+
+        status = {
+            "phase": command["phase"],
+            "reason": command["reason"],
+            "center": center,
+            "target": command["target"],
+            "speed": command["speed"],
+            "stamp": now,
+        }
+        self.status.publish(String(data=json.dumps(status, allow_nan=False)))
+
     def run(self):
         rate = rospy.Rate(20)
         while not rospy.is_shutdown():
@@ -75,9 +182,13 @@ class DeliveryMission:
             with self.lock:
                 now = rospy.get_time()
                 position = self.position
+                position_received = self.position_received
                 if position is not None:
                     terminal = self.guidance.phase in ("FAILED", "VERIFIED", "COMPLETE")
-                    fresh_position = 0 <= now - self.position_received <= self.position_timeout
+                    fresh_position = (
+                        position_received is not None
+                        and 0 <= now - position_received <= self.position_timeout
+                    )
                     if not terminal and not fresh_position:
                         self.guidance.transition("FAILED", now, "position_feedback_unavailable")
                     command = self.guidance.tick(position, now)
@@ -85,32 +196,6 @@ class DeliveryMission:
             if command is None:
                 rate.sleep()
                 continue
-            phase = command["phase"]
-            if phase != self.last_phase:
-                rospy.loginfo("Camera pickup phase: %s (%s)", phase, command["reason"] or "")
-                if phase in ("ASCEND_TO_OBSERVATION", "APPROACH"):
-                    # Access and visual approach both belong to GO_TO_PICKUP.
-                    if not self.go_to_pickup_published:
-                        self.state.publish(String(data="GO_TO_PICKUP"))
-                        self.go_to_pickup_published = True
-                elif phase == "WAIT_FOR_PICKUP":
-                    self.state.publish(String(data="WAIT_FOR_PICKUP"))
-                elif phase == "CARRY_ASCEND":
-                    self.state.publish(String(data="GO_TO_DROPOFF"))
-                elif phase == "WAIT_FOR_DROP":
-                    self.state.publish(String(data="WAIT_FOR_DROP"))
-                elif phase == "COMPLETE":
-                    self.state.publish(String(data="COMPLETE"))
-                self.last_phase = phase
-            self.speed.publish(Float32(data=command["speed"]))
-            self.target.publish(Point(*command["target"]))
-            delta = [command["target"][axis] - position[axis] for axis in (0, 1)]
-            length = math.hypot(*delta)
-            self.heading.publish(Vector3(delta[0] / length if length else 0, delta[1] / length if length else 0, 0))
-            if command["action"] != self.last_action:
-                self.action.publish(String(data=command["action"]))
-                self.last_action = command["action"]
-            self.status.publish(String(data=json.dumps({"phase": phase, "reason": command["reason"],
-                "center": center, "target": command["target"], "speed": command["speed"],
-                "stamp": now}, allow_nan=False)))
+            self.report_phase(command["phase"], command["reason"])
+            self.publish_command(command, position, center, now)
             rate.sleep()

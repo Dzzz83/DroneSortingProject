@@ -131,6 +131,15 @@ class PlannerTests(unittest.TestCase):
         result = LocalPlanner(self.map, self.small).plan(self.start, self.goal, 10)
         self.assertEqual(result.state, "HOLD")
 
+    def test_short_same_cell_diagonal_cannot_cross_occupied_envelope_corner(self):
+        self.map.settings.resolution = .25
+        self.map.observed(-16, 16, -16, 16, -8, 8)
+        self.map.block(0, 0, 0)
+        planner = LocalPlanner(self.map, VehicleEnvelope(1.55, 1.40, 1.26, .772),
+                               allow_vertical=True)
+        result = planner.plan((-1.57, 1.63, 1.375), (-1.51, 1.68, 1.375), 10.)
+        self.assertEqual((result.state, result.reason), ('HOLD', 'direct_segment_not_observed_free'))
+
     def test_no_map_and_unsupported_vertical_goal_hold(self):
         self.map.bounds = None
         result = LocalPlanner(self.map, self.small).plan(self.start, self.goal, 10)

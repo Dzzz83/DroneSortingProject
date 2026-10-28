@@ -21,6 +21,7 @@ for argument in "$@"; do
     [[ "$argument" == *:=* ]] || fail "Expected a ROS launch argument such as speed:=2.0 (use --help)."
 done
 select_ros_environment
+check_ros_python_dependencies
 [[ -f "$WORKSPACE/devel/setup.bash" ]] || fail 'Prepare the ROS workspace with setup_demo.sh first.'
 echo '[NAVIGATION] Open TwoWarehouseDelivery in Unity and press Play. No detector or package mission is started.'
 exec "${ROS_RUNNER[@]}" -c '

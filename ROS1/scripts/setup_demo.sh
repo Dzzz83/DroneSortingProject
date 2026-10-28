@@ -23,6 +23,7 @@ SETUP_PYTHON="${DETECTOR_SETUP_PYTHON:-python3.11}"
 command -v "$SETUP_PYTHON" >/dev/null || fail 'Install Python 3.11 with venv support, or set DETECTOR_SETUP_PYTHON.'
 "$SETUP_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 11), "Detector setup requires Python 3.11"'
 select_ros_environment
+check_ros_python_dependencies
 validate_camera_workspace
 "${ROS_RUNNER[@]}" -c 'source /opt/ros/noetic/setup.bash && command -v catkin_make >/dev/null' || fail 'Selected ROS environment needs ROS Noetic and catkin_make; see README.'
 mkdir -p "$PROJECT_ROOT/ROS1/build"

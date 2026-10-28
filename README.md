@@ -43,7 +43,11 @@ For an existing checkout, enter its root and run `git lfs pull`, then
 `bash ROS1/scripts/setup_demo.sh`.
 
 Setup creates the detector environment, verifies the included model, and builds
-the ROS workspace. It does not install Unity or system packages.
+the ROS workspace. It checks NumPy in ROS's `/usr/bin/python3` separately from the
+host detector environment. The run commands also check it before starting the
+demo. Install `python3-numpy` inside the selected ROS environment if requested;
+see [ROS dependency installation](docs/setup-and-troubleshooting.md#ros-environment).
+Setup does not install Unity or system packages.
 Wait for `[OK] Setup complete`.
 Rerun setup after dependencies change, with the demo stopped. No training is needed.
 
@@ -164,6 +168,10 @@ Python code or rerunning setup. Its three sections control:
 | `camera_pickup` | Mission: destination, observation point, heights, speeds, pickup tolerances and phase timeouts |
 | `motion_controller` | Movement: maximum speed, obstacle avoidance, feedback timeouts and command-lead limit |
 | `package_perception` | Vision: package search bounds, accepted surface heights and maximum observation age |
+
+Mission numeric parameters must be finite numbers, not booleans or quoted strings.
+`required_observations` must be a positive integer. Horizontal destination and
+observation coordinates may be zero or negative; pickup limits remain positive.
 
 All speeds below are **metres/second**, under `camera_pickup`:
 
@@ -405,8 +413,9 @@ flight results are recorded below.
 ## Depth movement prototype
 
 Milestone 2 adds an **opt-in** depth-only controller experiment. The default
-heuristic stays unchanged. Before moving, measure and configure the full
-drone envelope and read [depth-motion instructions](docs/depth-motion.md).
+workflow still uses heuristic avoidance. It holds when front and both sides are
+blocked and rechecks a selected bypass side before moving. Before moving, measure
+and configure the full drone envelope and read [depth-motion instructions](docs/depth-motion.md).
 The navigation-only workflow below has now verified obstacle detours on the saved
 static course. Planner status includes a compact `start_clearance` voxel breakdown
 to diagnose initial HOLDs. Historical yaw-only tests found vertical blind spots;
@@ -496,9 +505,15 @@ General route planning, repeated deliveries and automatic recovery are unfinishe
 This branch includes the forward depth sensor and a live local-map node.
 The opt-in navigation-only launch uses six-direction physics-depth observations,
 full-envelope clearance and three-dimensional observed-space goal selection.
+Clearance checks cover every change in voxel overlap along a segment, including
+brief diagonal corner crossings; occupied and unknown cells remain blocked.
 Two complete A-to-B runs passed with different obstacle detours, accurate final
 arrival and no reported contacts. The current goal excludes package detection,
 pickup and dropoff.
+The [2026-10-28 regression checks](docs/navigation-smoothness.md#review-fixes-verification-2026-10-28)
+include another exact rendered A-to-B arrival and a headless trial stopped by
+a contact near B. The headless contact remains unexplained; these results do not
+establish repeatable collision-free navigation.
 Two consecutive local ROS/Unity runs completed physical pickup, carry, release and
 settling inside the destination zone at a carry speed of **0.5 m/s**. Carry took
 about 110 seconds in each run, within the 120-second limit. Those checks cover the
@@ -532,7 +547,10 @@ Run `bash ROS1/scripts/run_navigation.sh`, then open `TwoWarehouseDelivery` and 
 Only this launcher opts into `/drone/approved_trajectory` (short ordered segments,
 reset identity, expiry and STOP). Unity acknowledges stopped motion and its
 actual ROS position on `/drone/trajectory_status` before each restart. Legacy
-point commands and package workflows are unchanged. Navigation pauses the unused package camera through
+point commands and package actions keep their existing interfaces. Pending STOP
+packets are retried every 0.25 s with the same sequence number until a fresh,
+matching acknowledgement arrives; no movement is issued while waiting.
+Navigation pauses the unused package camera through
 `/drone/camera/enabled` (`std_msgs/Bool`) and uses physics-only forward depth,
 with no synthetic RGB;
 Navigation requests approvals at 50 Hz; legacy control remains at 20 Hz.

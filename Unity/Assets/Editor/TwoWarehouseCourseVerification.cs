@@ -195,10 +195,15 @@ public static class TwoWarehouseCourseVerification
             executor.transform.position=origin;
             executor.ResetForTrial();
             Packet(1,false,origin,origin,true);
+            string stopAcknowledgement = executor.TrajectoryStatusJson(100000);
+            Packet(1,false,origin,origin,true);
+            Require(executor.TrajectoryStatusJson(100000)==stopAcknowledgement,
+                "Retried stop packets preserve the acknowledged stop identity and position.");
             Packet(2,true,origin,origin+Vector3.right*.1f);
+            Packet(1,false,origin,origin,true);
             executor.AdvanceTrajectory(.025f,100025);
             Require(Vector3.Distance(executor.transform.position,origin+Vector3.right*.05f)<.0001f,
-                "Approved movement is interpolated at the requested speed.");
+                "Approved movement is interpolated; a delayed duplicate stop cannot cancel the new chain.");
             Packet(3,false,origin+Vector3.right*.1f,origin+new Vector3(.1f,0,.1f));
             executor.AdvanceTrajectory(.05f,100075);
             Require(Vector3.Distance(executor.transform.position,origin+new Vector3(.1f,0,.05f))<.0001f,

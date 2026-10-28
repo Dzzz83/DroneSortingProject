@@ -33,28 +33,74 @@ class ObservedClearance:
             return self.checked[position]
         if self.prefix is None:
             return False
-        r = self.resolution
         e = self.envelope
         limits = ((position[0]-e.half_x, position[0]+e.half_x),
                   (position[1]-e.half_y, position[1]+e.half_y),
                   (position[2]-e.below, position[2]+e.above))
+        result = self._box_free(limits)
+        self.checked[position] = result
+        return result
+
+    def _box_free(self, limits):
+        """Check an axis-aligned volume with the planner's face-contact tolerance."""
+        if self.prefix is None:
+            return False
+        r = self.resolution
         epsilon = r*1e-8
         low = tuple(math.floor((a+epsilon)/r) for a, _b in limits)
         high = tuple(math.floor((b-epsilon)/r) for _a, b in limits)
         if any(a < lo or b > hi for a, b, (lo, hi) in zip(low, high, self.bounds)):
-            self.checked[position] = False
             return False
         x,y,z = (a-lo for a,lo in zip(low,self.lower))
         X,Y,Z = (b-lo+1 for b,lo in zip(high,self.lower))
         p = self.prefix
         count = (p[X,Y,Z]-p[x,Y,Z]-p[X,y,Z]-p[X,Y,z]
                  +p[x,y,Z]+p[x,Y,z]+p[X,y,z]-p[x,y,z])
-        result = bool(count == (X-x)*(Y-y)*(Z-z))
-        self.checked[position] = result
-        return result
+        return bool(count == (X-x)*(Y-y)*(Z-z))
 
     def sweep_free(self, start, end):
-        samples = max(1, math.ceil(math.dist(start,end)/(self.resolution*.5)))
-        return all(self.volume_free(tuple(start[d]+(end[d]-start[d])*i/samples
-                                          for d in range(3)))
-                   for i in range(samples+1))
+        """Certify every voxel overlap along a linear envelope translation.
+
+        Overlap changes only when an envelope face crosses a voxel plane.
+        Checking those events and each intervening interval catches brief corner
+        intersections that a fixed spatial sampling distance can miss.
+        """
+        e = self.envelope
+        below, above = (e.half_x, e.half_y, e.below), (e.half_x, e.half_y, e.above)
+        swept_limits = tuple((min(a, b)-lo, max(a, b)+hi)
+                             for a, b, lo, hi in zip(start, end, below, above))
+        # Most search edges are axis-aligned. Their swept volume is exactly one
+        # box; a clear enclosing box also certifies any diagonal it contains.
+        if self._box_free(swept_limits):
+            return True
+        if sum(a != b for a, b in zip(start, end)) <= 1:
+            return False
+        if not self.volume_free(start) or not self.volume_free(end):
+            return False
+
+        resolution = self.resolution
+        epsilon = resolution*1e-8
+        events = {0., 1.}
+        for a, b, lo, hi in zip(start, end, below, above):
+            delta = b-a
+            if delta == 0:
+                continue
+            # Use the same effective face positions as _box_free, so touching
+            # a voxel boundary does not introduce a different clearance rule.
+            for offset in (-lo+epsilon, hi-epsilon):
+                face_start, face_end = a+offset, b+offset
+                first = math.floor(min(face_start, face_end)/resolution) + 1
+                last = math.ceil(max(face_start, face_end)/resolution)
+                for plane in range(first, last):
+                    fraction = (plane*resolution-face_start)/delta
+                    if 0 < fraction < 1:
+                        events.add(fraction)
+
+        def clear_at(fraction):
+            return self.volume_free(tuple(a+(b-a)*fraction for a, b in zip(start, end)))
+
+        ordered = sorted(events)
+        for left, right in zip(ordered, ordered[1:]):
+            if not clear_at((left+right)*.5) or not clear_at(right):
+                return False
+        return True

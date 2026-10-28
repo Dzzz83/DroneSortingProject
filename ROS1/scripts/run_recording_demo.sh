@@ -27,6 +27,10 @@ HELP
         *) fail "Unknown argument: $argument (use --help)." ;;
     esac
 done
+if [[ "$BUILD_ONLY" != true ]]; then
+    select_ros_environment
+    check_ros_python_dependencies
+fi
 PLAYER="$PROJECT_ROOT/Unity/Builds/CourseRecording/CourseDemo.x86_64"
 BUILD_RESULT="$PROJECT_ROOT/Unity/Logs/course-recording-build.result"
 BUILD_REQUEST="$PROJECT_ROOT/Unity/Temp/course-recording-build.request"

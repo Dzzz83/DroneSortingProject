@@ -26,7 +26,10 @@ publishes `/drone/trajectory_status` (`std_msgs/String`) at a nominal 20 Hz:
 `position` in ROS axes. ROS waits for the matching STOP acknowledgement before
 anchoring a restart. Initial startup uses the same handshake. Local rejection or
 expiry reports `stopped` and triggers a new STOP handshake; delayed ordinary
-position feedback cannot supply a restart anchor.
+position feedback cannot supply a restart anchor. ROS retries a pending STOP
+every 0.25 s with its original reset identity and sequence until a fresh matching
+acknowledgement arrives. Unity ignores duplicate packets but continues reporting
+the acknowledged state; delayed retries cannot cancel a newer movement chain.
 
 Unity verifies the epoch, order, expiry, finite coordinates, segment continuity,
 maximum 0.255 m queued arc (0.25 m plus float tolerance), and collision latch. It consumes only sequential
@@ -210,3 +213,43 @@ contribution for each change. No full-course recorded run was attempted after th
 short acceptance comparison failed. Work stopped at the user's request to finish
 the current comparison and report the result. Test recordings and probes were
 removed, and the test recorder, player and ROS processes were stopped.
+
+## Review fixes verification (2026-10-28)
+
+The ROS Noetic suite passed **237 tests**, including regressions for brief swept
+envelope overlaps, stop retry/recovery, blocked heuristic bypasses and missing
+ROS NumPy. Sweeps were also checked against an independent segment/box
+intersection calculation on 250 seeded segments. Changed Python files parsed,
+changed shell scripts passed `bash -n`, and `git diff --check` passed.
+Unity 6000.6.0f1 compiled and passed `COURSE_SPECTATOR_CHECKS_PASS`,
+`OBSTACLE_DEPTH_CHECKS_PASS` and `NAVIGATION_SMOOTHNESS_CHECKS_PASS`. The executor
+checks now include repeated STOP acknowledgements and a delayed duplicate STOP
+arriving after a newer movement chain.
+
+A fixed 3D local-goal obstacle fixture with the configured drone envelope took
+**143.9 ms median before** and **96.2 ms after** the clearance change, across five
+plans per implementation. Both produced READY routes. This checks that the
+stronger sweep query is practical on that fixture; it is not a general flight
+speed benchmark.
+
+Two real ROS/Unity trials used the existing standalone course player and current
+ROS sources, requested 2 m/s, start `(34,50,3)` and destination `(34,119.5,3)`:
+
+| Player mode | Outcome | Contact |
+| --- | --- | --- |
+| Headless (`-batchmode -nographics`) | FAILED at 64.1 s, ROS `(35.035,109.875,3.125)` | `Bldg_Screw_002`; 9.68 m short of B |
+| Rendered, 1280×720 | ARRIVED at 244.9 s; exact destination, zero final error | None reported |
+
+The rendered duration comes from the coordinator's NAVIGATING/ARRIVED log times;
+its status `elapsed` continues increasing after arrival. The initial observer's
+240 s deadline expired before arrival, so observation resumed on the same flight
+to confirm arrival and the course's latched no-contact state. The rendered
+trial's sampled planning times had a 44.1 ms median and 257.9 ms maximum.
+
+The headless contact cause was not established. The later rendered success does
+not explain it or prove repeatable collision-free travel. Requested 2 m/s was
+not sustained, and these runs do not establish a speed improvement. Known
+TextMeshPro font-resource exceptions appeared at startup. The headless run also
+reported queue drops at startup. Recording was off in both trials; recording
+slowdown remains unresolved. Test player, ROS and observer processes were stopped
+and disposable probes/logs removed after collecting these results.

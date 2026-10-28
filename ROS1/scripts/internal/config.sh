@@ -30,6 +30,12 @@ select_ros_environment() {
     ROS_RUNNER=(distrobox enter --name "$ROS_CONTAINER" -- bash)
 }
 
+check_ros_python_dependencies() {
+    # Nodes use Noetic's system interpreter, independently of the host detector venv.
+    "${ROS_RUNNER[@]}" -c '/usr/bin/python3 -c "import numpy"' ||
+        fail 'NumPy is missing from the selected ROS environment. Run sudo apt-get update and sudo apt-get install -y python3-numpy inside that environment (omit sudo if root), then retry.'
+}
+
 validate_camera_workspace() {
     WORKSPACE="$(realpath -m "$WORKSPACE")"
     ENDPOINT_SOURCE="$(realpath -m "$ENDPOINT_SOURCE")"

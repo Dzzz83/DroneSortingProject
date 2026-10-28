@@ -12,6 +12,38 @@ LAUNCHER = ROOT / 'ROS1/scripts/run_demo.sh'
 
 
 class LauncherTests(unittest.TestCase):
+    def test_missing_ros_numpy_refuses_setup_and_all_launchers_before_startup(self):
+        with tempfile.TemporaryDirectory(prefix='demo project ') as temporary:
+            project = Path(temporary)
+            commands = project / 'commands'
+            commands.mkdir()
+            runner = commands / 'distrobox'
+            runner.write_text('#!/bin/bash\nexit 1\n')
+            runner.chmod(0o755)
+            scene = project / 'Unity/Assets/Scenes/MainWarehouse.unity'
+            scene.parent.mkdir(parents=True)
+            scene.touch()
+            config = project / 'ROS1/package/config/demo.yaml'
+            config.parent.mkdir(parents=True)
+            config.write_text('{}\n')
+            weights = project / 'weights.pt'
+            weights.touch()
+            environment = dict(os.environ, PROJECT_ROOT=temporary, ROS_ENVIRONMENT='distrobox',
+                               PATH=str(commands) + os.pathsep + os.environ['PATH'],
+                               UNITY_EDITOR='/bin/true', DETECTOR_PYTHON='/bin/true',
+                               DETECTOR_SETUP_PYTHON='/bin/true', DETECTOR_WEIGHTS=str(weights),
+                               CAMERA_DEMO_MEMORY_MODE='off')
+            for script in ('setup_demo.sh', 'run_demo.sh', 'run_navigation.sh', 'run_recording_demo.sh'):
+                with self.subTest(script=script):
+                    result = subprocess.run(['bash', str(ROOT / 'ROS1/scripts' / script)],
+                                            env=environment, capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('python3-numpy', result.stderr)
+                    self.assertNotIn('[RESTART]', result.stdout)
+                    self.assertNotIn('[BUILD]', result.stdout)
+                    self.assertNotIn('[READY]', result.stdout)
+            self.assertFalse((project / 'ROS1/build').exists())
+
     def test_unknown_option_is_rejected_before_startup(self):
         result = subprocess.run(['bash', str(LAUNCHER), '--automatic-play'],
                                 capture_output=True, text=True, timeout=10)
