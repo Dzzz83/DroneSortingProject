@@ -84,6 +84,16 @@ def _load_access_settings() -> ObservationAccessSettings:
     )
 
 
+def horizontal_heading(position, target):
+    """Return a unit direction in ROS X/Y; vertical or zero travel has no heading."""
+    delta_x = target[0] - position[0]
+    delta_y = target[1] - position[1]
+    horizontal_distance = math.hypot(delta_x, delta_y)
+    if horizontal_distance > 0:
+        return Vector3(delta_x / horizontal_distance, delta_y / horizontal_distance, 0)
+    return Vector3(0, 0, 0)
+
+
 class DeliveryMission:
     def __init__(self):
         self.guidance = DeliveryGuidance(
@@ -93,7 +103,7 @@ class DeliveryMission:
         )
         self.lock = threading.Lock()
         self.position = None
-        self.position_received = None
+        self.position_received_time = None
         self.position_timeout = 0.5
         self.last_action = ""
         self.last_phase = None
@@ -116,7 +126,7 @@ class DeliveryMission:
             return
         with self.lock:
             self.position = position
-            self.position_received = rospy.get_time()
+            self.position_received_time = rospy.get_time()
 
     def receive_candidates(self, message):
         with self.lock:
@@ -153,12 +163,7 @@ class DeliveryMission:
         self.speed.publish(Float32(data=command["speed"]))
         self.target.publish(Point(*command["target"]))
 
-        delta_x = command["target"][0] - position[0]
-        delta_y = command["target"][1] - position[1]
-        horizontal_distance = math.hypot(delta_x, delta_y)
-        heading = Vector3(0, 0, 0)
-        if horizontal_distance > 0:
-            heading = Vector3(delta_x / horizontal_distance, delta_y / horizontal_distance, 0)
+        heading = horizontal_heading(position, command["target"])
         self.heading.publish(heading)
 
         if command["action"] != self.last_action:
@@ -182,17 +187,17 @@ class DeliveryMission:
             with self.lock:
                 now = rospy.get_time()
                 position = self.position
-                position_received = self.position_received
+                position_received_time = self.position_received_time
                 if position is not None:
-                    terminal = self.guidance.phase in ("FAILED", "VERIFIED", "COMPLETE")
+                    is_guidance_finished = self.guidance.phase in ("FAILED", "VERIFIED", "COMPLETE")
                     fresh_position = (
-                        position_received is not None
-                        and 0 <= now - position_received <= self.position_timeout
+                        position_received_time is not None
+                        and 0 <= now - position_received_time <= self.position_timeout
                     )
-                    if not terminal and not fresh_position:
+                    if not is_guidance_finished and not fresh_position:
                         self.guidance.transition("FAILED", now, "position_feedback_unavailable")
                     command = self.guidance.tick(position, now)
-                    center = self.guidance.center
+                center = self.guidance.center
             if command is None:
                 rate.sleep()
                 continue

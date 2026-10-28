@@ -1,7 +1,6 @@
 """Exercise the pickup transport/control boundary without a ROS master or Unity."""
 
 import json
-import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -369,8 +368,7 @@ class ControlLoopTests(unittest.TestCase):
                     self.controller(**{name: value})
 
     def test_waiting_for_first_position_does_not_hold_callback_lock(self):
-        node = DeliveryMission.__new__(DeliveryMission)
-        node.lock = threading.Lock()
+        node = self.camera_node()
         node.position = None
         rate = Mock()
         rate.sleep.side_effect = lambda: self.assertFalse(node.lock.locked())
@@ -385,7 +383,7 @@ class ControlLoopTests(unittest.TestCase):
                 patch.object(rospy, "Publisher", side_effect=lambda *args, **kwargs: Mock()), patch.object(rospy, "Subscriber"):
             node = DeliveryMission()
         node.position = (12, 55, 6)
-        node.position_received = 99
+        node.position_received_time = 99
         return node
 
     def test_default_mission_always_starts_with_observation_access(self):
@@ -431,7 +429,7 @@ class ControlLoopTests(unittest.TestCase):
 
     def test_delivery_publishes_the_existing_public_mission_sequence(self):
         node = self.camera_node()
-        node.position_received = 100
+        node.position_received_time = 100
         node.guidance = Mock(center=(32.8, 24, 0.3))
         for phase in ("APPROACH", "WAIT_FOR_PICKUP", "LIFT", "CARRY_ASCEND", "CARRY",
                       "LOWER", "WAIT_FOR_DROP", "SETTLE", "COMPLETE"):
@@ -455,7 +453,7 @@ class ControlLoopTests(unittest.TestCase):
 
     def test_access_and_approach_publish_go_to_pickup_once(self):
         node = self.camera_node()
-        node.position_received = 100
+        node.position_received_time = 100
         node.guidance = Mock(center=None)
         for phase in ("ASCEND_TO_OBSERVATION", "GO_TO_OBSERVATION", "HOVER", "OBSERVE", "APPROACH"):
             node.guidance.phase = phase
