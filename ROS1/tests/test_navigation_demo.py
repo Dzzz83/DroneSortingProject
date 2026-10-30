@@ -32,6 +32,31 @@ class NavigationDemoTests(unittest.TestCase):
         from drone_sorting.interfaces import ros_topics as topics
         self.assertFalse(self.pubs[topics.PACKAGE_CAMERA_ENABLED].publish.call_args[0][0].data)
 
+    def test_reset_on_start_requires_a_boolean(self):
+        for value in ('true', 'false', 0, 1, None, {}, []):
+            with self.subTest(value=value):
+                self.params['~reset_on_start'] = value
+                with self.assertRaisesRegex(ValueError, '~reset_on_start'):
+                    NavigationDemo()
+        for value in (True, False):
+            with self.subTest(value=value):
+                self.params['~reset_on_start'] = value
+                self.assertIs(NavigationDemo().reset_on_start, value)
+
+    def test_navigation_limits_require_positive_finite_numbers(self):
+        for name in ('timeout', 'stall_timeout', 'arrival_tolerance'):
+            for value in (True, False, '90', None, {}, [], 0, -1, float('nan'), float('inf')):
+                with self.subTest(parameter=name, value=value):
+                    self.params['~' + name] = value
+                    with self.assertRaises(ValueError):
+                        NavigationDemo()
+            for value in (2, 2.5):
+                with self.subTest(parameter=name, value=value):
+                    self.params['~' + name] = value
+                    node = NavigationDemo()
+                    self.assertEqual(getattr(node.guidance, name), float(value))
+            del self.params['~' + name]
+
     def test_waits_for_feedback_and_requires_sustained_physical_arrival(self):
         self.assertEqual(self.node.tick(10)['state'],'WAITING')
         self.feedback()
@@ -59,7 +84,7 @@ class NavigationDemoTests(unittest.TestCase):
         self.node.reset_publisher.publish.assert_called_once()
         self.node.receive_course(String('{"reset_sequence":2}'))
         self.assertFalse(self.node.reset_on_start)
-        self.assertIsNone(self.node.position)
+        self.assertIsNone(self.node.guidance.position)
         self.assertEqual(self.node.tick(10)['state'],'WAITING')
 
     def test_stall_and_mission_timeouts_stop_target_publication(self):
@@ -67,6 +92,6 @@ class NavigationDemoTests(unittest.TestCase):
         self.now=101.;self.feedback()
         self.assertEqual(self.node.tick(self.now)['reason'],'no_navigation_progress')
         self.now=102.;self.feedback(sequence=2);self.node.tick(self.now)
-        self.node.timeout=1.
+        self.node.guidance.timeout=1.
         self.now=104.;self.feedback((.6,0,3),sequence=2)
         self.assertEqual(self.node.tick(self.now)['reason'],'mission_timeout')

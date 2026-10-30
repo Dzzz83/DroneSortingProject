@@ -13,6 +13,7 @@ from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
 
 from drone_sorting.interfaces import ros_topics
+from drone_sorting.interfaces.parameters import read_float, read_int, read_float_list
 from drone_sorting.perception.camera_validation import validate_frame
 from drone_sorting.perception.package_localization import localize_detections
 from drone_sorting.perception.package_grasp import estimate_grasp
@@ -20,10 +21,14 @@ from drone_sorting.perception.package_grasp import estimate_grasp
 
 class PackagePerception:
     def __init__(self):
-        self.port = int(rospy.get_param("~detector_port", 10001))
-        self.maximum_age = float(rospy.get_param("~maximum_age", 1.5))
-        self.area = tuple(rospy.get_param("~pickup_bounds", [31.5, 36.5, 22.5, 27.5]))
-        self.height_range = tuple(rospy.get_param("~surface_height_range", [0.2, 1.2]))
+        self.port = read_int("detector_port", 10001)
+        self.maximum_age = read_float("maximum_age", 1.5)
+        area = read_float_list("pickup_bounds", [31.5, 36.5, 22.5, 27.5])
+        height_range = read_float_list("surface_height_range", [0.2, 1.2])
+        if area is None or height_range is None:
+            raise ValueError("Perception bounds are required")
+        self.area = tuple(area)
+        self.height_range = tuple(height_range)
         if (not 0 < self.port < 65536 or not math.isfinite(self.maximum_age) or self.maximum_age <= 0
                 or len(self.area) != 4 or len(self.height_range) != 2
                 or not all(math.isfinite(value) for value in self.area + self.height_range)
@@ -42,7 +47,7 @@ class PackagePerception:
         self.synchronizer.registerCallback(self.receive)
         self.worker = threading.Thread(target=self.process, daemon=True)
         self.worker.start()
-        self.health = rospy.Timer(rospy.Duration(0.5), self.check_health)
+        self.health = rospy.Timer(rospy.Duration.from_sec(0.5), self.check_health)
 
     def publish(self, state, frame=None, reason=None, **fields):
         result = {"schema_version": 1, "state": state, "frame_id": "warehouse", "candidates": [],

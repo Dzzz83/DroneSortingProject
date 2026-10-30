@@ -8,27 +8,35 @@ from geometry_msgs.msg import Point
 from std_msgs.msg import Float32, Float32MultiArray, String
 from drone_sorting.interfaces import ros_topics
 from drone_sorting.control.approved_trajectory import ApprovedTrajectoryStream, InsufficientTrajectoryTime
+from drone_sorting.control.pickup_navigation_handover import PickupNavigationHandover
+
+
+def _read_float_parameter(name: str, default: float) -> float:
+    value = rospy.get_param("~" + name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Parameter ~" + name + " must be a number")
+    return float(value)
 
 
 class MotionController:
     TRAJECTORY_STOP_RETRY_INTERVAL = .25
 
     def __init__(self):
-        self.speed = float(rospy.get_param("~speed", 2.0))
+        self.speed = _read_float_parameter("speed", 2.0)
         if not math.isfinite(self.speed) or self.speed <= 0:
             raise ValueError("Motion speed must be finite and positive")
         self.maximum_speed = self.speed
         self.enable_dynamic_speed = rospy.get_param("~enable_dynamic_speed", False)
-        self.update_rate = float(rospy.get_param("~update_rate", 20.0))
+        self.update_rate = _read_float_parameter("update_rate", 20.0)
         if not math.isfinite(self.update_rate) or not 1 <= self.update_rate <= 100:
             raise ValueError("update_rate must be between 1 and 100 Hz")
         # Bound outstanding movement while waiting for Unity's slower position feedback.
-        self.maximum_command_lead = float(rospy.get_param("~maximum_command_lead", 0.25))
+        self.maximum_command_lead = _read_float_parameter("maximum_command_lead", 0.25)
         if not math.isfinite(self.maximum_command_lead) or self.maximum_command_lead <= 0:
             raise ValueError("maximum_command_lead must be finite and positive")
-        self.position_timeout = float(rospy.get_param("~position_timeout", 0.0))
-        self.target_timeout = float(rospy.get_param("~target_timeout", 0.0))
-        self.speed_timeout = float(rospy.get_param("~speed_timeout", 0.0))
+        self.position_timeout = _read_float_parameter("position_timeout", 0.0)
+        self.target_timeout = _read_float_parameter("target_timeout", 0.0)
+        self.speed_timeout = _read_float_parameter("speed_timeout", 0.0)
 
         for name in ("position_timeout", "target_timeout", "speed_timeout"):
             value = getattr(self, name)
@@ -61,6 +69,12 @@ class MotionController:
         self.use_approved_trajectories = (mode == "depth" and bool(
             rospy.get_param("~depth_smooth_trajectory_enabled", False)))
         self.trajectory_stream = ApprovedTrajectoryStream() if self.use_approved_trajectories else None
+        depth_after_pickup = rospy.get_param("~depth_after_pickup", False)
+        if not isinstance(depth_after_pickup, bool):
+            raise ValueError("depth_after_pickup must be true or false")
+        if depth_after_pickup and not (self.use_approved_trajectories and self.enable_dynamic_speed):
+            raise ValueError("depth_after_pickup requires smooth depth trajectories and dynamic speed")
+        self.handover = PickupNavigationHandover() if depth_after_pickup else None
         self.trajectory_publisher = (rospy.Publisher(
             ros_topics.APPROVED_TRAJECTORY, String, queue_size=20)
             if self.use_approved_trajectories else None)
@@ -145,6 +159,38 @@ class MotionController:
         except (ValueError, KeyError, TypeError):
             return
         self.current_phase = phase
+        if self.handover is not None:
+            self.handover.receive_phase(phase, rospy.get_time())
+
+    def _apply_pickup_handover(self, now):
+        """Execute handover decisions; trajectory validation stays in this controller."""
+        handover = self.handover
+        depth = self.depth_navigation
+        if handover is None or depth is None:
+            return False
+        previous_state = handover.state
+        decision = handover.tick(
+            now, has_collision=depth.contact_detected,
+            package_attached=depth.package_attached,
+            package_received_time=depth.package_received_time,
+            course_received_time=depth.course_received,
+        )
+        if decision.action == "FAIL" and previous_state != "FAILED":
+            rospy.logwarn("Pickup/navigation controller stopped: %s", decision.reason)
+        if decision.action == "START_STOP":
+            # Discard every pre-handover approval, including unloaded paths.
+            depth.follower.reset()
+            depth.local_goal = None
+            depth.mission_target = None
+            depth.last_goal_publish = -math.inf
+        if decision.request_stop:
+            self._stop_trajectory(force=True, now=now)
+        if decision.action == "CHECK_STOP":
+            if not self._trajectory_ready(now):
+                return False
+            handover.confirm_stop()
+            return True
+        return decision.action in ("ALLOW_PICKUP", "ALLOW_NAVIGATION")
 
     def _current_position_callback(self, message):
         if not all(math.isfinite(value) for value in (message.x, message.y, message.z)):
@@ -185,12 +231,13 @@ class MotionController:
         """Restart only from Unity's acknowledged, stationary applied position."""
         if self.trajectory_stream is None:
             return True
-        if self.depth_navigation.reset_sequence is None:
+        navigation = self.depth_navigation
+        if navigation is None or navigation.reset_sequence is None:
             return False
         if self.trajectory_needs_sync and self.trajectory_stop_sequence is None:
             self._stop_trajectory(force=True, now=now)
         status = self.trajectory_status
-        if (status is None or status["reset_sequence"] != self.depth_navigation.reset_sequence
+        if (status is None or status["reset_sequence"] != navigation.reset_sequence
                 or self._feedback_expired(self.trajectory_status_received, .5, now)
                 or not 0 <= now - status["stamp_ms"] / 1000.0 <= .5):
             self._stop_trajectory(now=now)
@@ -275,9 +322,14 @@ class MotionController:
                 self.gap_start_position = None
                 self.closest_target_dist = float("inf")
 
+        target = self.target_position
+        command = self.command_position
+        if target is None or command is None:
+            return "HOLD"
+
         # Current 2D distance to target
-        dx_t = self.target_position.x - self.command_position.x
-        dy_t = self.target_position.y - self.command_position.y
+        dx_t = target.x - command.x
+        dy_t = target.y - command.y
         curr_target_dist = math.sqrt(dx_t * dx_t + dy_t * dy_t)
 
         # Continue a bypass until a usable opening or excessive divergence.
@@ -299,14 +351,14 @@ class MotionController:
             if self.bypass_direction is not None and not front_blocked:
                 if self.gap_start_position is None:
                     self.gap_start_position = Point(
-                        x=self.command_position.x,
-                        y=self.command_position.y,
-                        z=self.command_position.z,
+                        x=command.x,
+                        y=command.y,
+                        z=command.z,
                     )
                     return self.bypass_direction
 
-                dx_g = self.command_position.x - self.gap_start_position.x
-                dy_g = self.command_position.y - self.gap_start_position.y
+                dx_g = command.x - self.gap_start_position.x
+                dy_g = command.y - self.gap_start_position.y
                 gap_traveled = math.sqrt(dx_g * dx_g + dy_g * dy_g)
 
                 if gap_traveled < self.min_gap_width:
@@ -342,6 +394,8 @@ class MotionController:
 
     def _within_feedback_limit(self, point):
         observed = self.current_position
+        if observed is None:
+            return False
         lead = math.dist((point.x, point.y, point.z), (observed.x, observed.y, observed.z))
         return lead <= self.maximum_command_lead + 1e-9
 
@@ -351,6 +405,8 @@ class MotionController:
             sequence = self.depth_navigation.reset_sequence
             if sequence is not None and sequence != self.depth_reset_seen:
                 if self.depth_reset_seen is not None:
+                    if self.handover is not None:
+                        self.handover.receive_reset()
                     self.command_position = None
                     self.current_position = None
                     self.position_received = None
@@ -367,7 +423,10 @@ class MotionController:
                     self.trajectory_first_move = None
                     self.trajectory_status = None
         now = rospy.get_time()
-        if not self._trajectory_ready(now):
+        if self.handover is not None and not self._apply_pickup_handover(now):
+            return
+        uses_depth = self.handover is None or self.handover.state == "NAVIGATING"
+        if uses_depth and not self._trajectory_ready(now):
             return
         if self.command_position is None or self.target_position is None or self.current_position is None:
             return
@@ -391,7 +450,7 @@ class MotionController:
             self._log_status("WAIT_FOR_FEEDBACK")
             return
 
-        if self.avoidance_mode == "depth":
+        if self.avoidance_mode == "depth" and uses_depth:
             self._update_depth_command(now)
             return
 
@@ -411,7 +470,8 @@ class MotionController:
             p in self.current_phase for p in ("DESCEND", "LIFT", "WAIT", "APPROACH", "REFINE", "LOWER")
         )
 
-        if self.avoidance_mode == "heuristic" and not is_vertical_phase:
+        uses_pickup_avoidance = self.handover is not None and self.handover.state == "PICKUP"
+        if (self.avoidance_mode == "heuristic" or uses_pickup_avoidance) and not is_vertical_phase:
             decision = self._choose_avoidance_action()
         else:
             decision = "FORWARD"
@@ -445,10 +505,16 @@ class MotionController:
 
     def _update_depth_command(self, now):
         """Advance only along a fresh, epoch-matched approved path."""
+        navigation = self.depth_navigation
+        if navigation is None:
+            return
         command = self.command_position
         observed = self.current_position
         target = self.target_position
-        result = self.depth_navigation.tick(
+        if command is None or observed is None or target is None:
+            self._stop_trajectory(now=now)
+            return
+        result = navigation.tick(
             (command.x, command.y, command.z),
             (observed.x, observed.y, observed.z),
             (target.x, target.y, target.z), now, self.speed/self.update_rate)
@@ -473,11 +539,11 @@ class MotionController:
             segment_distance = math.dist(result.next_position, (command.x, command.y, command.z))
             execution_window = (queued_distance + segment_distance) / self.speed + .05
             try:
-                status = self.depth_navigation.follower.status
+                status = navigation.follower.status
                 packet = self.trajectory_stream.move(
                     (command.x, command.y, command.z),
                     (approved.x, approved.y, approved.z),
-                    self.depth_navigation.reset_sequence, self.speed, now, status,
+                    navigation.reset_sequence, self.speed, now, status,
                     minimum_ttl=execution_window)
             except InsufficientTrajectoryTime:
                 self._log_status("WAIT_FOR_APPROVAL_WINDOW")
@@ -487,7 +553,10 @@ class MotionController:
                 return
             if self.trajectory_first_move is None:
                 self.trajectory_first_move = self.trajectory_stream.sequence
-            self.trajectory_publisher.publish(String(data=packet))
+            publisher = self.trajectory_publisher
+            if publisher is None:
+                return
+            publisher.publish(String(data=packet))
         else:
             self._publish_commands(approved)
         self.command_position = approved
@@ -499,10 +568,13 @@ class MotionController:
         Reanchoring from ordinary feedback here would race the remaining Unity
         queue. Only _trajectory_ready may anchor, after the stop is acknowledged.
         """
-        if self.trajectory_stream is None:
+        if self.trajectory_stream is None or self.trajectory_publisher is None:
+            return
+        navigation = self.depth_navigation
+        if navigation is None:
             return
         if self.trajectory_stop_sequence is None:
-            sequence = self.depth_navigation.reset_sequence
+            sequence = navigation.reset_sequence
             if sequence is None:
                 return
             packet = self.trajectory_stream.stop(sequence, force=force)

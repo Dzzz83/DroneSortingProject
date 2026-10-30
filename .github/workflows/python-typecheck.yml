@@ -1,0 +1,19 @@
+name: ROS Python type checking
+on: [push, pull_request]
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    container: ros:noetic-ros-base-focal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install development prerequisites
+        run: |
+          apt-get update
+          apt-get install -y python3.8-venv python3-numpy ros-noetic-message-filters ros-noetic-geometry-msgs ros-noetic-sensor-msgs ros-noetic-nav-msgs
+      - name: Install pinned type-check tooling
+        run: bash ROS1/scripts/setup_typecheck.sh
+      - name: Check ROS package and node entry points
+        run: bash ROS1/scripts/run_typecheck.sh

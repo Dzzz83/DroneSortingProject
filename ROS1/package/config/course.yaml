@@ -3,6 +3,8 @@
 # TwoWarehouseDelivery profile. The 3 m drone-root height fits the 4.5 m entrances.
 # The forklift and stacks intersect this height; avoidance is still unvalidated.
 camera_pickup:
+  # Hold after confirmed pickup and lift while course navigation is integrated.
+  stop_after_pickup: true
   # Fly from DroneStart to this observation point before selecting a package.
   observation_x: 34.0
   observation_y: 55.0

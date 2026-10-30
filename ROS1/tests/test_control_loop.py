@@ -16,13 +16,27 @@ except ImportError:
 
 @unittest.skipIf(rospy is None, "Requires ROS Noetic message packages")
 class ControlLoopTests(unittest.TestCase):
+    def test_numeric_parameters_require_numbers_before_conversion(self):
+        for name in ('speed', 'update_rate', 'maximum_command_lead',
+                     'position_timeout', 'target_timeout', 'speed_timeout'):
+            for value in (True, False, '2', None, [], {}):
+                with self.subTest(parameter=name, value=value):
+                    with self.assertRaisesRegex(ValueError, '~' + name):
+                        self.controller(**{'~' + name: value})
+            for value in (1, 1.5):
+                with self.subTest(parameter=name, value=value):
+                    node = self.controller(dynamic=False, **{'~' + name: value})
+                    self.assertEqual(getattr(node, name), float(value))
+                    self.assertIsInstance(getattr(node, name), float)
+
     def controller(self, dynamic=True, **overrides):
         parameters = {"~enable_obstacle_avoidance": False, "~speed": 0.5,
                       "~enable_dynamic_speed": dynamic, "~position_timeout": 0.5,
                       "~target_timeout": 0.5, "~speed_timeout": 0.5}
         parameters.update(overrides)
         with patch.object(rospy, "get_param", side_effect=lambda key, default: parameters.get(key, default)), \
-                patch.object(rospy, "Publisher"), patch.object(rospy, "Subscriber"), \
+                patch.object(rospy, "Publisher", side_effect=lambda *args, **kwargs: Mock()), \
+                patch.object(rospy, "Subscriber"), \
                 patch.object(rospy, "loginfo"):
             node = MotionController()
         node._log_status = Mock()
@@ -47,6 +61,117 @@ class ControlLoopTests(unittest.TestCase):
         node.depth_reset_seen = 1
         return node
 
+    def combined_controller(self):
+        with patch("drone_sorting.control.depth_navigation.DepthNavigation"):
+            node = self.controller(**{
+                "~avoidance_mode": "depth", "~depth_smooth_trajectory_enabled": True,
+                "~depth_after_pickup": True})
+        depth = node.depth_navigation
+        depth.reset_sequence = node.depth_reset_seen = 1
+        depth.contact_detected = False
+        depth.package_attached = True
+        depth.package_received_time = depth.course_received = 100
+        self.speed(node, .5)
+        node._update_depth_command = Mock()
+        return node
+
+    def phase(self, node, phase, now=100):
+        from std_msgs.msg import String
+        with patch.object(rospy, "get_time", return_value=now):
+            node._phase_callback(String(json.dumps({"phase": phase})))
+
+    def test_combined_pickup_uses_points_without_entering_trajectory_mode(self):
+        node = self.combined_controller()
+        self.update(node)
+        self.assertEqual(node.handover.state, "PICKUP")
+        self.phase(node, "LIFT")
+        self.update(node)
+        node.command_publisher.publish.assert_called_once()
+        node.trajectory_publisher.publish.assert_not_called()
+        node._update_depth_command.assert_not_called()
+
+    def test_combined_mode_requires_smooth_depth_and_dynamic_speed(self):
+        for parameters in ({'~depth_after_pickup': 'true'},
+                           {'~depth_after_pickup': True},
+                           {'~depth_after_pickup': True, '~avoidance_mode': 'depth'},
+                           {'~depth_after_pickup': True, '~avoidance_mode': 'depth',
+                            '~depth_smooth_trajectory_enabled': True, '~enable_dynamic_speed': False}):
+            with self.subTest(parameters=parameters), self.assertRaises(ValueError):
+                self.controller(**parameters)
+
+    def test_combined_pickup_retains_heuristic_avoidance_during_access(self):
+        node = self.combined_controller()
+        self.phase(node, "GO_TO_OBSERVATION")
+        node._choose_avoidance_action = Mock(return_value='HOLD')
+        self.update(node)
+        node._choose_avoidance_action.assert_called_once()
+        self.assertEqual(node.command_position.x, 0)
+
+    def test_combined_handover_requires_matching_stopped_ack_and_never_returns_to_points(self):
+        node = self.combined_controller()
+        self.phase(node, "VERIFIED")
+        self.update(node)
+        self.phase(node, "NAVIGATE_TO_DROPOFF")
+        self.update(node)
+        stop = json.loads(node.trajectory_publisher.publish.call_args[0][0].data)
+        self.assertTrue(stop['stop'])
+        node.depth_navigation.follower.reset.assert_called_once()
+        self.trajectory_status(node, stop['sequence'] - 1)
+        self.update(node)
+        self.assertEqual(node.handover.state, "STOPPING")
+        node._update_depth_command.assert_not_called()
+        self.trajectory_status(node, stop['sequence'], stopped=False)
+        self.update(node)
+        self.assertEqual(node.handover.state, "STOPPING")
+        self.trajectory_status(node, stop['sequence'], x=.03)
+        self.update(node)
+        node._update_depth_command.assert_not_called()
+        self.update(node)
+        self.assertEqual(node.handover.state, "NAVIGATING")
+        self.assertEqual(node.command_position.x, .03)
+        node._update_depth_command.assert_called_once()
+        self.phase(node, "LIFT")
+        self.update(node)
+        self.assertEqual(node.handover.state, "FAILED")
+        node.command_publisher.publish.assert_not_called()
+
+    def test_combined_handover_rejects_unverified_pickup_or_missing_package_feedback(self):
+        for problem in ('unverified', 'detached', 'missing_package_stamp', 'stale_course'):
+            with self.subTest(problem=problem):
+                node = self.combined_controller()
+                if problem != 'unverified':
+                    self.phase(node, "VERIFIED")
+                self.phase(node, "NAVIGATE_TO_DROPOFF")
+                self.update(node)
+                if problem == 'detached':
+                    node.depth_navigation.package_attached = False
+                elif problem == 'missing_package_stamp':
+                    node.depth_navigation.package_received_time = None
+                elif problem == 'stale_course':
+                    node.depth_navigation.course_received = 99
+                self.update(node)
+                self.assertEqual(node.handover.state, "FAILED")
+                node._update_depth_command.assert_not_called()
+                node.command_publisher.publish.assert_not_called()
+
+    def test_combined_handover_timeout_or_reset_latches_failure(self):
+        for reset in (False, True):
+            with self.subTest(reset=reset):
+                node = self.combined_controller()
+                self.phase(node, "VERIFIED")
+                self.phase(node, "NAVIGATE_TO_DROPOFF")
+                self.update(node)
+                if reset:
+                    node.depth_navigation.reset_sequence = 2
+                    self.update(node)
+                else:
+                    self.phase(node, "NAVIGATE_TO_DROPOFF", now=106)
+                    node.depth_navigation.package_received_time = node.depth_navigation.course_received = 106
+                    self.update(node, now=106)
+                self.assertEqual(node.handover.state, "FAILED")
+                node._update_depth_command.assert_not_called()
+                node.command_publisher.publish.assert_not_called()
+
     def trajectory_status(self, node, sequence, stopped=True, x=0, now=100, epoch=1):
         from std_msgs.msg import String
         with patch.object(rospy, "get_time", return_value=now):
@@ -67,6 +192,28 @@ class ControlLoopTests(unittest.TestCase):
         self.assertIsNone(node.trajectory_stop_sequence)
         self.assertEqual(node.command_position.x, .03)
         node.depth_navigation.tick.assert_not_called()
+
+    def test_missing_depth_positions_stop_without_planning_or_moving(self):
+        for name in ('command_position', 'current_position', 'target_position'):
+            with self.subTest(position=name):
+                node = self.smooth_controller()
+                node.trajectory_stream.move((0, 0, 6), (.1, 0, 6), 1, 2, 100,
+                                            {'stamp': 100, 'observation_stamp': 100})
+                setattr(node, name, None)
+                node._update_depth_command(100)
+                node.depth_navigation.tick.assert_not_called()
+                node.command_publisher.publish.assert_not_called()
+                packet = json.loads(node.trajectory_publisher.publish.call_args[0][0].data)
+                self.assertTrue(packet['stop'])
+
+    def test_missing_depth_navigation_cannot_authorize_or_publish_trajectory(self):
+        node = self.smooth_controller()
+        node.depth_navigation = None
+        self.assertFalse(node._trajectory_ready(100))
+        node._stop_trajectory(force=True, now=100)
+        node._update_depth_command(100)
+        node.trajectory_publisher.publish.assert_not_called()
+        node.command_publisher.publish.assert_not_called()
 
     def test_smooth_stop_does_not_rewind_to_delayed_position(self):
         node = self.smooth_controller()

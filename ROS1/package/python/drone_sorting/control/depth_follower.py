@@ -59,7 +59,7 @@ class DepthPathFollower:
     def next_step(self, command, observed, goal, reset_sequence, now, distance):
         """Return one short, on-path position or HOLD; does NOT publish anything."""
         status = self.status
-        if self.path is None or status is None:
+        if self.path is None or self.path_stamp is None or status is None:
             return FollowDecision("HOLD", "awaiting_approved_path")
         if status.get("state") != "READY":
             return FollowDecision("HOLD", "planner_" + str(status.get("reason", "unavailable")))

@@ -110,6 +110,8 @@ class LocalDepthMap:
         return tuple(math.floor(value/self.settings.resolution) for value in point)
 
     def _inside(self, cell):
+        if self.bounds is None:
+            return False
         x, y, z = cell
         (x0, x1), (y0, y1), (z0, z1) = self.bounds
         return x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1

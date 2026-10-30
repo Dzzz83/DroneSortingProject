@@ -1,0 +1,11 @@
+{
+  "include": ["ROS1/package/python", "ROS1/package/nodes"],
+  "pythonVersion": "3.8",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "standard",
+  "extraPaths": [
+    "ROS1/package/python",
+    "ROS1/build/typecheck-venv/lib/python3.8/site-packages",
+    "/opt/ros/noetic/lib/python3/dist-packages"
+  ]
+}

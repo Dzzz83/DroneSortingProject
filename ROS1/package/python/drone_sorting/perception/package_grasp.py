@@ -29,6 +29,8 @@ def fit_top_face(points, side=0.6):
         area = (right - left) * (upper - bottom)
         if best is None or area < best[0]:
             best = (area, cosine, sine, left, right, bottom, upper, rotated)
+    if best is None:
+        raise ValueError("No grasp orientation evaluated")
     _, cosine, sine, left, right, bottom, upper, rotated = best
     spans = (right - left, upper - bottom)
     if not all(side - 0.06 <= span <= side + 0.04 for span in spans):

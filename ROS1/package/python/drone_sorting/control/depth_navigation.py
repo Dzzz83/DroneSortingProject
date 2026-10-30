@@ -15,12 +15,23 @@ from drone_sorting.control.depth_follower import DepthPathFollower, FollowDecisi
 from drone_sorting.interfaces import ros_topics as topics
 
 
+def _read_float_parameter(name: str, default: float) -> float:
+    value = rospy.get_param("~" + name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Parameter ~" + name + " must be a number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Parameter ~" + name + " must be finite")
+    return number
+
+
 class DepthNavigation:
     def __init__(self):
-        self.follower = DepthPathFollower(maximum_observation_age=float(
-            rospy.get_param('~depth_maximum_observation_age', .5)))
+        self.follower = DepthPathFollower(maximum_observation_age=
+            _read_float_parameter('depth_maximum_observation_age', .5))
         self.reset_sequence = None
         self.package_attached = False
+        self.package_received_time = None
         self.mission_target = None
         self.contact_detected = False
         self.course_received = None
@@ -31,7 +42,7 @@ class DepthNavigation:
         self.last_hold = None
         self.autonomous_goals = rospy.get_param('~depth_autonomous_goals', False)
         self.allow_vertical = rospy.get_param('~depth_allow_vertical', False)
-        self.goal_lookahead = float(rospy.get_param('~depth_goal_lookahead', 3.0))
+        self.goal_lookahead = _read_float_parameter('depth_goal_lookahead', 3.0)
         if not 0.5 <= self.goal_lookahead <= 5.0 or not math.isfinite(self.goal_lookahead):
             raise ValueError('depth_goal_lookahead must be between 0.5 and 5 m')
         self.goal_publisher = rospy.Publisher(topics.LOCAL_PLAN_GOAL, Point, queue_size=1)
@@ -57,6 +68,7 @@ class DepthNavigation:
         self.course_received = rospy.get_time()
         self.contact_detected |= observation.get("collision_observed") is True
         attached = observation.get('package_attached')
+        self.package_received_time = rospy.get_time() if isinstance(attached, bool) else None
         if isinstance(attached, bool) and attached != self.package_attached:
             self.package_attached = attached
             self.follower.reset()

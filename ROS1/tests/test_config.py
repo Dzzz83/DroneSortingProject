@@ -119,7 +119,10 @@ class MissionConfigurationTests(unittest.TestCase):
             if kind is PickupSettings:
                 self.assertTrue(all(isinstance(value, (int, float)) and math.isfinite(value) and value > 0
                                     for value in values.values()))
-        self.assertEqual(set(mission), known_fields)
+        optional_options = {'stop_after_pickup', 'navigate_after_pickup'}
+        for name in optional_options:
+            self.assertIsInstance(mission.get(name, False), bool)
+        self.assertEqual(set(mission) - optional_options, known_fields)
 
 
 if __name__ == '__main__':

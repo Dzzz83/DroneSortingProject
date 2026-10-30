@@ -124,6 +124,9 @@ class PickupGuidance:
             if self.observation_valid and self.last_seen is not None and now - self.last_seen <= settings.maximum_age and self.stable_count >= settings.required_observations:
                 self.transition("APPROACH", now)
         elif self.phase in ("APPROACH", "DESCEND"):
+            if self.center is None:
+                self.transition("FAILED", now, "missing_package_center")
+                return {"target": target, "speed": speed, "action": action, "phase": self.phase, "reason": self.reason}
             fresh = self.observation_valid and self.last_seen is not None and now - self.last_seen <= settings.maximum_age
             if not fresh:
                 if self.last_seen is None or now - self.last_seen > settings.loss_timeout:
@@ -143,6 +146,9 @@ class PickupGuidance:
                         self.transition("WAIT_FOR_PICKUP", now)
                         action = "PICKUP"
         elif self.phase == "LIFT":
+            if self.center is None:
+                self.transition("FAILED", now, "missing_package_center")
+                return {"target": target, "speed": speed, "action": action, "phase": self.phase, "reason": self.reason}
             target = (self.center[0], self.center[1], self.center[2] + settings.mount_offset + settings.lift_clearance)
             speed = settings.lift_speed
             if distance(position, target) <= settings.arrival_tolerance:

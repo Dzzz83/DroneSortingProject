@@ -3,6 +3,7 @@
 import json
 import math
 import threading
+from typing import Optional
 
 import rospy
 from geometry_msgs.msg import Point, Vector3
@@ -15,6 +16,7 @@ from drone_sorting.mission.delivery_guidance import (
     ObservationAccessSettings,
 )
 from drone_sorting.mission.pickup_guidance import PickupSettings
+from drone_sorting.navigation.guidance import NavigationGuidance
 
 
 def _read_float_parameter(name: str, default: float, *, positive: bool = False) -> float:
@@ -96,11 +98,28 @@ def horizontal_heading(position, target):
 
 class DeliveryMission:
     def __init__(self):
+        stop_after_pickup = rospy.get_param("~stop_after_pickup", False)
+        if not isinstance(stop_after_pickup, bool):
+            raise ValueError("~stop_after_pickup must be true or false")
+        navigate_after_pickup = rospy.get_param("~navigate_after_pickup", False)
+        if not isinstance(navigate_after_pickup, bool):
+            raise ValueError("~navigate_after_pickup must be true or false")
+        delivery_settings = _load_delivery_settings()
         self.guidance = DeliveryGuidance(
             pickup_settings=_load_pickup_settings(),
-            delivery_settings=_load_delivery_settings(),
+            delivery_settings=delivery_settings,
             access_settings=_load_access_settings(),
+            # The coordinator owns travel after pickup in the combined workflow.
+            stop_after_pickup=stop_after_pickup or navigate_after_pickup,
         )
+        self.navigation: Optional[NavigationGuidance] = None
+        if navigate_after_pickup:
+            self.navigation = NavigationGuidance(
+                destination=(delivery_settings.dropoff_x, delivery_settings.dropoff_y,
+                             delivery_settings.carry_height),
+                timeout=delivery_settings.travel_timeout,
+            )
+        self.stage = "PICKUP"
         self.lock = threading.Lock()
         self.position = None
         self.position_received_time = None
@@ -117,6 +136,8 @@ class DeliveryMission:
         rospy.Subscriber(ros_topics.CURRENT_POSITION, Point, self.receive_position, queue_size=1)
         rospy.Subscriber(ros_topics.PACKAGE_CANDIDATES, String, self.receive_candidates, queue_size=1)
         rospy.Subscriber(ros_topics.PACKAGE_ACTION_STATUS, String, self.receive_status, queue_size=1)
+        if self.navigation is not None:
+            rospy.Subscriber(ros_topics.COURSE_OBSERVATIONS, String, self.receive_course, queue_size=1)
         self.action.publish(String(data=""))
         self.state.publish(String(data="IDLE"))
 
@@ -127,6 +148,33 @@ class DeliveryMission:
         with self.lock:
             self.position = position
             self.position_received_time = rospy.get_time()
+            if self.navigation is not None:
+                self.navigation.receive_position(position, self.position_received_time)
+
+    def receive_course(self, message):
+        with self.lock:
+            navigation = self.navigation
+            if navigation is None:
+                return
+            try:
+                data = json.loads(message.data)
+                sequence = data["reset_sequence"]
+                if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+                    return
+            except (ValueError, TypeError, KeyError):
+                return
+            now = rospy.get_time()
+            previous_sequence = navigation.reset_sequence
+            navigation.receive_course(sequence, data.get("collision_observed") is True, now)
+            if previous_sequence is not None and previous_sequence != sequence:
+                # Reset releases the package. Never resume travel with an old pickup result.
+                self.position = None
+                self.position_received_time = None
+                self.stage = "FAILED"
+                self.guidance.transition("FAILED", now, "course_reset_during_mission")
+            elif navigation.has_collision and self.stage != "FAILED":
+                self.stage = "FAILED"
+                self.guidance.transition("FAILED", now, "contact_detected")
 
     def receive_candidates(self, message):
         with self.lock:
@@ -151,7 +199,7 @@ class DeliveryMission:
                 self.go_to_pickup_published = True
         elif phase == "WAIT_FOR_PICKUP":
             self.state.publish(String(data="WAIT_FOR_PICKUP"))
-        elif phase == "CARRY_ASCEND":
+        elif phase in ("CARRY_ASCEND", "NAVIGATE_TO_DROPOFF"):
             self.state.publish(String(data="GO_TO_DROPOFF"))
         elif phase == "WAIT_FOR_DROP":
             self.state.publish(String(data="WAIT_FOR_DROP"))
@@ -180,6 +228,39 @@ class DeliveryMission:
         }
         self.status.publish(String(data=json.dumps(status, allow_nan=False)))
 
+    def select_command(self, position, now):
+        """Choose one stage's output. Caller holds the feedback lock."""
+        navigation = self.navigation
+        if navigation is None:
+            return self.guidance.tick(position, now)
+        if self.stage == "PICKUP":
+            command = self.guidance.tick(position, now)
+            if self.guidance.phase == "FAILED":
+                self.stage = "FAILED"
+            elif self.guidance.phase == "VERIFIED":
+                # Publish one stopped update before supplying navigation targets.
+                self.stage = "NAVIGATE_TO_DROPOFF"
+            return command
+
+        target = position
+        speed = 0.0
+        reason = self.guidance.reason
+        if self.stage == "HOLD_AT_DROPOFF":
+            reason = "destination_reached"
+        if self.stage == "NAVIGATE_TO_DROPOFF":
+            requested_target, status = navigation.tick(now)
+            reason = status["reason"]
+            if status["state"] == "FAILED":
+                self.stage = "FAILED"
+                self.guidance.transition("FAILED", now, reason)
+            elif status["state"] == "ARRIVED":
+                self.stage = "HOLD_AT_DROPOFF"
+            elif requested_target is not None:
+                target = requested_target
+                speed = self.guidance.delivery.carry_speed
+        return {"target": target, "speed": speed, "action": "",
+                "phase": self.stage, "reason": reason}
+
     def run(self):
         rate = rospy.Rate(20)
         while not rospy.is_shutdown():
@@ -194,9 +275,14 @@ class DeliveryMission:
                         position_received_time is not None
                         and 0 <= now - position_received_time <= self.position_timeout
                     )
-                    if not is_guidance_finished and not fresh_position:
+                    needs_position = not is_guidance_finished or (
+                        self.navigation is not None and self.stage != "FAILED"
+                    )
+                    if needs_position and not fresh_position:
                         self.guidance.transition("FAILED", now, "position_feedback_unavailable")
-                    command = self.guidance.tick(position, now)
+                        if self.navigation is not None:
+                            self.stage = "FAILED"
+                    command = self.select_command(position, now)
                 center = self.guidance.center
             if command is None:
                 rate.sleep()

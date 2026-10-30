@@ -26,6 +26,7 @@ ROS1/logs/
 # Python generated files
 __pycache__/
 *.pyc
+node_modules/
 
 # OS files
 .DS_Store

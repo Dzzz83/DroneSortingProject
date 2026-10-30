@@ -44,6 +44,13 @@ class MissionParameterTests(unittest.TestCase):
                 expected = ["~" + field.name for field in fields(settings_type)]
                 self.assertCountEqual(requested, expected)
 
+    def test_pickup_only_requires_a_boolean(self):
+        for invalid in ("true", "false", 0, 1, None, [], {}):
+            with self.subTest(value=invalid):
+                self.parameters = {"~stop_after_pickup": invalid}
+                with self.assertRaisesRegex(ValueError, "~stop_after_pickup"):
+                    delivery.DeliveryMission()
+
     def test_supported_profiles_load_all_configured_values(self):
         import yaml
 
@@ -55,6 +62,13 @@ class MissionParameterTests(unittest.TestCase):
                 with self.subTest(profile=profile, settings=settings_type.__name__):
                     expected = {field.name: mission[field.name] for field in fields(settings_type)}
                     self.assertEqual(asdict(load()), expected)
+
+    def test_navigate_after_pickup_requires_a_boolean(self):
+        for value in ("true", "false", 0, 1, None, [], {}):
+            with self.subTest(value=value):
+                self.parameters = {"~navigate_after_pickup": value}
+                with self.assertRaisesRegex(ValueError, "~navigate_after_pickup"):
+                    delivery.DeliveryMission()
 
     def test_invalid_numeric_types_name_the_parameter(self):
         for settings_type, load in self.loaders:
@@ -146,9 +160,126 @@ class MissionTransportTests(unittest.TestCase):
     def messages(self, topic):
         return [message for published_topic, message in self.published if published_topic == topic]
 
+    def enable_navigation(self):
+        parameters = {"~navigate_after_pickup": True, "~dropoff_x": 34,
+                      "~dropoff_y": 119.5, "~carry_height": 3}
+        with patch.object(rospy, "get_param", side_effect=lambda name, default: parameters.get(name, default)):
+            self.mission = delivery.DeliveryMission()
+        self.published.clear()
+        self.mission.receive_course(String('{"reset_sequence": 1}'))
+        self.mission.receive_position(Point(34, 55, 2.25))
+
+    def finish_pickup(self):
+        self.mission.guidance.center = (34, 55, 0.3)
+        self.mission.guidance.transition("WAIT_FOR_PICKUP", self.now)
+        self.mission.receive_status(String("PICKUP_DONE"))
+        self.run_ticks(1)
+
+    def test_combined_mission_switches_once_after_confirmed_pickup_and_lift(self):
+        self.enable_navigation()
+        self.assertTrue(self.mission.guidance.stop_after_pickup)
+        self.mission.guidance.transition("WAIT_FOR_PICKUP", self.now)
+        self.run_ticks(1)
+        self.assertEqual(self.mission.stage, "PICKUP")
+        self.finish_pickup()
+        self.assertEqual(self.mission.stage, "NAVIGATE_TO_DROPOFF")
+        self.assertIsNone(self.mission.navigation.started_time)
+        self.assertEqual(self.messages(delivery.ros_topics.COMMAND_SPEED)[-1].data, 0)
+        with patch.object(self.mission.guidance, "tick", side_effect=AssertionError("pickup restarted")):
+            self.run_ticks(2)
+        self.assertEqual(self.messages(delivery.ros_topics.TARGET_POSITION)[-1], Point(34, 119.5, 3))
+        self.assertGreater(self.messages(delivery.ros_topics.COMMAND_SPEED)[-1].data, 0)
+        self.assertEqual([message.data for message in self.messages(delivery.ros_topics.MISSION_STATE)],
+                         ["WAIT_FOR_PICKUP", "GO_TO_DROPOFF"])
+        self.assertIsNone(self.mission.guidance.carry_start)
+
+    def test_failed_pickup_and_stale_verified_position_cannot_start_navigation(self):
+        for stale_position in (False, True):
+            with self.subTest(stale_position=stale_position):
+                self.enable_navigation()
+                if stale_position:
+                    self.mission.guidance.transition("VERIFIED", self.now)
+                    self.now += 0.6
+                else:
+                    self.mission.guidance.transition("FAILED", self.now, "pickup_failed")
+                self.run_ticks(2)
+                self.assertEqual(self.mission.stage, "FAILED")
+                self.assertIsNone(self.mission.navigation.started_time)
+                self.assertTrue(all(message.data == 0 for message in self.messages(delivery.ros_topics.COMMAND_SPEED)))
+
+    def test_navigation_arrival_holds_without_drop_or_complete(self):
+        self.enable_navigation()
+        self.finish_pickup()
+        for elapsed in (0.1, 0.6, 1.2, 2.0):
+            self.now = 100 + elapsed
+            self.mission.receive_course(String('{"reset_sequence": 1}'))
+            self.mission.receive_position(Point(34, 119.5, 3))
+            self.run_ticks(1)
+        self.assertEqual(self.mission.stage, "HOLD_AT_DROPOFF")
+        self.assertEqual(self.messages(delivery.ros_topics.COMMAND_SPEED)[-1].data, 0)
+        self.assertEqual(self.messages(delivery.ros_topics.PACKAGE_ACTION), [])
+        self.assertNotIn("COMPLETE", [message.data for message in self.messages(delivery.ros_topics.MISSION_STATE)])
+
+    def test_collision_or_reset_during_navigation_latches_failure(self):
+        for report, reason in (({'reset_sequence': 1, 'collision_observed': True}, 'contact_detected'),
+                               ({'reset_sequence': 2}, 'course_reset_during_mission')):
+            with self.subTest(reason=reason):
+                self.enable_navigation()
+                self.finish_pickup()
+                self.mission.receive_course(String(json.dumps(report)))
+                self.mission.receive_position(Point(34, 55, 2.25))
+                self.run_ticks(2)
+                self.assertEqual(self.mission.stage, "FAILED")
+                self.assertEqual(self.mission.guidance.reason, reason)
+                self.assertEqual(self.messages(delivery.ros_topics.COMMAND_SPEED)[-1].data, 0)
+
+    def test_navigation_timeout_and_missing_course_feedback_stop_commands(self):
+        self.enable_navigation()
+        self.finish_pickup()
+        self.run_ticks(1)
+        self.mission.navigation.timeout = 1
+        self.now += 1.1
+        self.mission.receive_course(String('{"reset_sequence": 1}'))
+        self.mission.receive_position(Point(34, 55, 2.25))
+        self.run_ticks(1)
+        self.assertEqual(self.mission.stage, "FAILED")
+        self.assertEqual(self.mission.guidance.reason, "mission_timeout")
+        self.enable_navigation()
+        self.finish_pickup()
+        self.now += 0.6
+        self.mission.receive_position(Point(34, 55, 2.25))
+        self.run_ticks(1)
+        self.assertEqual(self.messages(delivery.ros_topics.COMMAND_SPEED)[-1].data, 0)
+        self.assertIsNone(self.mission.navigation.started_time)
+
     def test_missing_position_does_not_publish_movement(self):
         self.run_ticks(1)
         self.assertEqual(self.published, [])
+
+    def test_profiles_select_pickup_only_and_publish_a_hold(self):
+        import yaml
+
+        config_directory = Path(__file__).resolve().parents[1] / "package/config"
+        self.assertFalse(self.mission.guidance.stop_after_pickup)
+        for profile, stops_after_pickup in (("demo.yaml", False), ("course.yaml", True)):
+            with self.subTest(profile=profile):
+                parameters = yaml.safe_load((config_directory / profile).read_text())["camera_pickup"]
+                with patch.object(rospy, "get_param", side_effect=lambda name, default: parameters.get(name[1:], default)):
+                    self.mission = delivery.DeliveryMission()
+                self.assertEqual(self.mission.guidance.stop_after_pickup, stops_after_pickup)
+                if not stops_after_pickup:
+                    continue
+                self.published.clear()
+                position = Point(34, 55, 2.25)
+                self.mission.receive_position(position)
+                self.mission.guidance.transition("VERIFIED", self.now)
+                self.run_ticks(2)
+                topics = delivery.ros_topics
+                self.assertEqual(self.mission.guidance.phase, "VERIFIED")
+                self.assertEqual([message.data for message in self.messages(topics.COMMAND_SPEED)], [0, 0])
+                self.assertEqual(self.messages(topics.TARGET_POSITION), [position, position])
+                self.assertEqual(self.messages(topics.PACKAGE_ACTION), [])
+                self.assertEqual(self.messages(topics.MISSION_STATE), [])
 
     def test_stale_position_fails_and_publishes_a_stop(self):
         topics = delivery.ros_topics

@@ -6,6 +6,28 @@ from drone_sorting.mission.delivery_guidance import DeliveryGuidance, DeliverySe
 
 
 class DeliveryGuidanceTests(unittest.TestCase):
+    def test_pickup_only_waits_for_confirmation_then_lifts_and_keeps_holding(self):
+        node = DeliveryGuidance(stop_after_pickup=True)
+        node.center = (32.8, 24, 0.3)
+        node.transition("WAIT_FOR_PICKUP", 100)
+        position = (32.8, 24, 1.25)
+        self.assertEqual(node.tick(position, 101)["phase"], "WAIT_FOR_PICKUP")
+        node.acknowledge("DROP_DONE", 101)
+        self.assertEqual(node.phase, "WAIT_FOR_PICKUP")
+        node.acknowledge("PICKUP_DONE", 102)
+        lifting = node.tick(position, 103)
+        self.assertEqual(lifting["phase"], "LIFT")
+        self.assertGreater(lifting["speed"], 0)
+
+        position = (32.8, 24, 2.25)
+        for now in (104, 105, 1000):
+            with self.subTest(now=now):
+                self.assertEqual(node.tick(position, now), {
+                    "target": position, "speed": 0.0, "action": "",
+                    "phase": "VERIFIED", "reason": None,
+                })
+                self.assertIsNone(node.carry_start)
+
     def lifted(self):
         node = DeliveryGuidance()
         node.center = (32.8, 24, 0.3)
@@ -112,6 +134,12 @@ class DeliveryGuidanceTests(unittest.TestCase):
 
 
 class ObservationAccessTests(unittest.TestCase):
+    def test_access_requires_settings_but_pickup_can_start_without_access(self):
+        node = DeliveryGuidance()
+        self.assertEqual(node.tick((34, 25, 6), 100)["phase"], "OBSERVE")
+        with self.assertRaisesRegex(ValueError, "Observation access requires access settings"):
+            node.access_command((34, 25, 6), 100)
+
     def test_ascent_travel_hover_and_only_post_arrival_observations(self):
         node = DeliveryGuidance(access_settings=ObservationAccessSettings())
         payload = {"state": "DETECTIONS", "frame_id": "warehouse", "stamp": {"secs": 100, "nsecs": 0},

@@ -3,7 +3,6 @@ import json
 import math
 import threading
 import time
-from dataclasses import asdict
 from collections import Counter
 
 import message_filters
@@ -16,6 +15,7 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from std_msgs.msg import Bool, Float32, Header, String
 
 from drone_sorting.interfaces import ros_topics as topics
+from drone_sorting.interfaces.parameters import read_float, read_int, read_bool, read_float_list
 from drone_sorting.mapping.depth_map import DepthObservation, LocalDepthMap, MapSettings
 from drone_sorting.mapping.local_planner import LocalPlanner, VehicleEnvelope
 from drone_sorting.mapping.local_goals import LocalGoalPlanner
@@ -54,14 +54,22 @@ def decode_observation(depth, info, camera, drone, now, maximum_age):
 
 class DepthMappingNode:
     def __init__(self):
-        defaults = asdict(MapSettings())
-        settings = MapSettings(**{name:rospy.get_param("~"+name,value) for name,value in defaults.items()})
-        self.maximum_age = float(rospy.get_param("~maximum_observation_age", .5))
-        self.update_rate = float(rospy.get_param("~update_rate", 4.))
+        defaults = MapSettings()
+        settings = MapSettings(
+            resolution=read_float('resolution', defaults.resolution),
+            radius=read_float('radius', defaults.radius),
+            vertical_radius=read_float('vertical_radius', defaults.vertical_radius),
+            maximum_age=read_float('maximum_age', defaults.maximum_age),
+            surface_margin=read_float('surface_margin', defaults.surface_margin),
+            pixel_stride=read_int('pixel_stride', defaults.pixel_stride),
+            clear_range_evidence=read_bool('clear_range_evidence', defaults.clear_range_evidence),
+        )
+        self.maximum_age = read_float('maximum_observation_age', .5)
+        self.update_rate = read_float('update_rate', 4.)
         if not 0 < self.maximum_age <= settings.maximum_age or not math.isfinite(self.update_rate) or self.update_rate <= 0:
             raise ValueError("Invalid observation age or map update rate")
-        heading = rospy.get_param("~camera_heading", [0.,1.])
-        if len(heading) != 2 or not all(math.isfinite(value) for value in heading) or math.hypot(*heading) < 1e-6:
+        heading = read_float_list("camera_heading", [0.,1.])
+        if heading is None or len(heading) != 2 or not all(math.isfinite(value) for value in heading) or math.hypot(*heading) < 1e-6:
             raise ValueError("Camera heading requires finite nonzero ROS X/Y")
         length = math.hypot(*heading)
         self.heading = Vector3(heading[0]/length,heading[1]/length,0)
@@ -89,17 +97,17 @@ class DepthMappingNode:
         self.latest_position = None
         self.latest_camera = None
         self.local_goal = None
-        dimensions = rospy.get_param("~planner_envelope", None)
+        dimensions = read_float_list("planner_envelope", None)
         if dimensions is not None and (not isinstance(dimensions, (list, tuple)) or len(dimensions) != 4):
             raise ValueError("planner_envelope must contain four measured extents")
         self.planner = (LocalPlanner(self.map, VehicleEnvelope(*dimensions),
-                                     int(rospy.get_param("~planner_max_expansions", 4000)),
-                                     allow_vertical=rospy.get_param("~planner_allow_vertical", False))
+                                     read_int("planner_max_expansions", 4000),
+                                     allow_vertical=read_bool("planner_allow_vertical", False))
                         if dimensions is not None else None)
         self.goal_selector = (LocalGoalPlanner(self.planner)
                               if self.planner and rospy.get_param('~select_local_goals', False) else None)
         self.unloaded_envelope = self.planner.envelope if self.planner else None
-        carried = rospy.get_param("~planner_carried_envelope", None)
+        carried = read_float_list("planner_carried_envelope", None)
         if carried is not None and (not isinstance(carried, (list, tuple)) or len(carried) != 4):
             raise ValueError("planner_carried_envelope must contain four measured extents")
         self.carried_envelope = VehicleEnvelope(*carried) if carried is not None else None
@@ -177,7 +185,7 @@ class DepthMappingNode:
             attached = payload.get("package_attached")
             if isinstance(attached, bool):
                 self.package_attached = attached
-                if self.planner is not None:
+                if self.planner is not None and self.unloaded_envelope is not None:
                     self.planner.envelope = (self.carried_envelope if attached and self.carried_envelope
                                              else self.unloaded_envelope)
             if self.reset_sequence is not None and sequence != self.reset_sequence:
@@ -242,7 +250,7 @@ class DepthMappingNode:
                 try:
                     if self.range_max != 15:
                         raise ValueError("missing_or_invalid_range_declaration")
-                    observation = decode_observation(*bundle, now, self.maximum_age)
+                    observation = decode_observation(bundle[0], bundle[1], bundle[2], bundle[3], now, self.maximum_age)
                     if observation.stamp <= self.reset_barrier:
                         raise ValueError("observation_precedes_reset")
                     # A long stream gap starts a new observation history. This
@@ -316,7 +324,8 @@ class DepthMappingNode:
         # Same in-memory map as depth processing; no cloud reconstruction.
         clock = (lambda: now) if clock is None else clock
         header = Header(stamp=rospy.Time.from_sec(now), frame_id="warehouse")
-        route = Path(header=header)
+        route_poses = []
+        route = Path(header=header, poses=route_poses)
         state, reason, expanded = "HOLD", "envelope_not_configured", 0
         plan_started = time.perf_counter()
         if self.planner is not None:
@@ -339,10 +348,10 @@ class DepthMappingNode:
                         pose = PoseStamped(header=header)
                         pose.pose.position = Point(*waypoint)
                         pose.pose.orientation.w = 1.0
-                        route.poses.append(pose)
+                        route_poses.append(pose)
         self.timings["planning_ms"] = (time.perf_counter()-plan_started)*1000
         details = {"stamp":now, "frame_id":"warehouse", "state":state,
-                   "reason":reason, "waypoints":len(route.poses),
+                   "reason":reason, "waypoints":len(route_poses),
                    "expanded":expanded, "reset_sequence":self.reset_sequence,
                    "observation_stamp":self.last_stamp, "goal":self.local_goal}
         if self.goal_selector:
@@ -363,7 +372,7 @@ class DepthMappingNode:
             details["timing_ms"]["observation_age_at_publish_ms"] = observation_age*1000
             if state == "READY" and not 0 <= observation_age <= self.maximum_age:
                 # A slow plan cannot turn an expired acquisition into approval.
-                route.poses.clear()
+                route_poses.clear()
                 details.update(state="HOLD", reason="map_stale_observation", waypoints=0)
         message = String(json.dumps(details,allow_nan=False))
         # Build diagnostics/JSON first: no expensive work separates the pair.

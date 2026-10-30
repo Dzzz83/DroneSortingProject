@@ -4,6 +4,18 @@ from drone_sorting.mission.pickup_guidance import PickupGuidance
 
 
 class PickupGuidanceTests(unittest.TestCase):
+    def test_missing_package_center_fails_without_moving_or_requesting_pickup(self):
+        for phase in ('APPROACH', 'DESCEND', 'LIFT'):
+            with self.subTest(phase=phase):
+                node = PickupGuidance()
+                node.transition(phase, 100)
+                command = node.tick((34, 25, 3), 100)
+                self.assertEqual(command['phase'], 'FAILED')
+                self.assertEqual(command['reason'], 'missing_package_center')
+                self.assertEqual(command['target'], (34, 25, 3))
+                self.assertEqual(command['speed'], 0)
+                self.assertEqual(command['action'], '')
+
     def observe(self, node, now, center=(34, 25, 0.44), state="DETECTIONS"):
         node.observe({"state": state, "frame_id": "warehouse", "stamp": {"secs": now, "nsecs": 0},
                       "candidates": [{"position": [center[0], center[1], center[2] + 0.3],

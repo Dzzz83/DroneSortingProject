@@ -1,0 +1,3 @@
+# Development-only NumPy type information, compatible with Python 3.8.
+# Noetic's system NumPy is preserved and tested separately.
+numpy==1.24.4

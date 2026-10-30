@@ -79,6 +79,24 @@ class DepthNavigationTests(unittest.TestCase):
         self.assertEqual(self.pubs[self.topics.LOCAL_PLAN_GOAL].sent[-1].x,3)
         self.assertEqual(len(self.pubs[self.topics.LOCAL_PLAN_SCAN_HEADING].sent),1)
 
+    def test_numeric_parameters_reject_invalid_types_and_limits(self):
+        for name in ('depth_maximum_observation_age', 'depth_goal_lookahead'):
+            for value in (True, False, '0.5', None, {}, [], float('nan'), float('inf'), 0, -1):
+                with self.subTest(parameter=name, value=value):
+                    with patch.object(self.module.rospy, 'get_param',
+                                      side_effect=lambda key, default: value if key == '~' + name else default):
+                        with self.assertRaises(ValueError):
+                            self.module.DepthNavigation()
+            for value in (1, 1.5):
+                with self.subTest(parameter=name, value=value):
+                    with patch.object(self.module.rospy, 'get_param',
+                                      side_effect=lambda key, default: value if key == '~' + name else default):
+                        node = self.module.DepthNavigation()
+                    actual = (node.follower.maximum_observation_age
+                              if name == 'depth_maximum_observation_age' else node.goal_lookahead)
+                    self.assertEqual(actual, float(value))
+                    self.assertIsInstance(actual, float)
+
     def test_approved_path_only_and_epoch_reset(self):
         self.node.tick((0,0,1),(0,0,1),(4,0,1),10,.01)
         self.node.receive_path(FakePath([(0,0,1),(3,0,1)],stamp=10))
@@ -162,5 +180,12 @@ class DepthNavigationTests(unittest.TestCase):
         self.assertIsNone(self.node.follower.path)
         self.node.receive_status(FakeString(json.dumps(status)))
         self.assertIsNone(self.node.follower.status)
+
+    def test_missing_package_field_does_not_refresh_attachment_confirmation(self):
+        self.node.receive_course(FakeString('{"reset_sequence":1,"package_attached":true}'))
+        self.assertEqual(self.node.package_received_time, 10)
+        self.clock = 10.1
+        self.node.receive_course(FakeString('{"reset_sequence":1}'))
+        self.assertIsNone(self.node.package_received_time)
 
 if __name__ == '__main__':unittest.main()

@@ -80,12 +80,34 @@ Use `bash ROS1/scripts/run_demo.sh --course` after setup. This opens
 `[READY]`, then press Play. ROS owns movement and package actions. The saved scene
 disables `HardcodedWarehouseFlight`; keep it disabled for ROS operation.
 
-The course profile observes the package near ROS `(34, 55)`, delivers to
-`(34, 119.5)`, and uses a 3 m drone-root cruising height for the 4.5 m entrances.
-Its pickup bounds, release height and travel timeout match the new layout.
+The course profile observes the package near ROS `(34, 55)` and now enables
+`camera_pickup.stop_after_pickup`: after Unity confirms pickup and the drone
+reaches its lift height, it holds with the package in phase `VERIFIED`.
+It does not report `COMPLETE` or request a drop. This pickup-only behavior still
+needs physical verification in Unity. Set the option to `false` to restore the
+existing delivery to `(34, 119.5)`, using a 3 m drone-root cruising height for the
+4.5 m entrances. The option defaults to `false` when omitted.
 Changing these settings does not create a safe route for the package workflow.
 The separate navigation-only command has completed the static course; the
 original command and `demo.yaml` retain their existing behavior. See [course coordinates and controls](Unity/TWO_WAREHOUSE.md).
+
+The experimental mission option `camera_pickup.navigate_after_pickup` defaults
+to `false` and is disabled in both profiles. When enabled it keeps pickup in
+pickup-only mode, then selects navigation to `(dropoff_x, dropoff_y, carry_height)`
+with `carry_speed` and `travel_timeout`, ending in `HOLD_AT_DROPOFF` without a
+drop or `COMPLETE`. It takes precedence over `stop_after_pickup`. Navigation
+uses its existing 0.15 m arrival tolerance and 90 s stall limit. A collision,
+failure, or mid-mission course reset stops the combined mission; restart it
+after resetting the scene. The matching controller option `depth_after_pickup`
+also defaults to `false`; it requires depth mode, smooth trajectories and dynamic
+speed. It retains heuristic pickup movement, then requires `VERIFIED` followed
+by `NAVIGATE_TO_DROPOFF`, sends STOP and waits up to 5 s for Unity's matching,
+fresh stopped acknowledgement before using depth trajectories. Missing/stale
+mission or attached-package feedback, a collision, or a course reset stops this
+workflow until restart. Pre-handover paths are discarded, and the existing mapper
+requires a measured `planner_carried_envelope` before approving loaded travel.
+The combined launch and carried-envelope configuration are not wired yet. Do not
+enable these options for physical runs until those integration steps are complete.
 
 A live ROS-TCP smoke test completed pickup, a known bypass and settled delivery
 inside B with no reported contacts. This checks transport and package mechanics;
@@ -243,12 +265,14 @@ following generated workspace symlinks back into the package.
 | `mission/delivery_guidance.py` | Observation access, carry, lower, release and settling |
 | `mission/pickup_guidance.py` | Select/track a package, align, descend, request pickup and lift |
 | `control/motion_controller.py` | One controller: legacy position commands at 20 Hz, navigation approvals at 50 Hz, avoidance, stale-data stops and bounded command lead |
+| `control/pickup_navigation_handover.py` | ROS-independent pickup/navigation state and timeout decisions; controller executes STOP and validates its acknowledgement |
 | `perception/package_perception.py` | Synchronize camera inputs, call detector and publish candidates |
 | `perception/camera_validation.py`, `camera_geometry.py` | Validate camera data and convert image/depth coordinates |
 | `perception/package_localization.py`, `package_grasp.py` | Locate packages in the warehouse and estimate grasp readiness |
 | `mapping/depth_map.py` | Local map: occupied, free-ray evidence and unknown space |
 | `mapping/local_goals.py`, `mapping/clearance.py` | Reachable observed-space goals and full-envelope clearance queries |
-| `navigation/demo.py`, `nodes/navigation_demo.py` | Navigation-only destination, physical arrival and failure coordination |
+| `navigation/guidance.py` | Reusable destination, physical arrival and failure decisions; no ROS publishing or scene startup |
+| `navigation/demo.py`, `nodes/navigation_demo.py` | Standalone navigation ROS wiring, course reset, package-camera pause and target/status publishing |
 | `mapping/live_mapping.py`, `nodes/depth_mapping.py` | Synchronize forward observations, update the map and publish map/status topics |
 | `interfaces/ros_topics.py` | ROS topic names; keep aligned with Unity's `DroneRosTopics.cs` |
 
@@ -304,13 +328,44 @@ They are ROS identities; the readable entry points are `mission.py` and `percept
 
 ## Verification
 
+Run static type checking after Python changes, alongside the affected tests.
+Install Node.js/npm on the host and `python3.8-venv` in Noetic, then run once:
+
+```bash
+bash ROS1/scripts/setup_typecheck.sh
+```
+
+Run from the host (it enters `ros-noetic` automatically), or a native Noetic shell:
+
+```bash
+bash ROS1/scripts/run_typecheck.sh
+```
+
+`pyrightconfig.json` covers `ROS1/package/python` and `ROS1/package/nodes` in
+standard mode for Python 3.8/Linux. It resolves the actual Noetic message packages
+and is also read by Pylance. Tests, host detector tools and generated builds have
+separate runtime environments and are not part of this static-check target.
+The npm lockfile pins Pyright. An isolated, system-site-packages development venv
+under `ROS1/build/typecheck-venv` provides pinned NumPy 1.24.4 type information;
+Noetic's system NumPy remains unchanged. Runtime tests below exercise the system
+interpreter, so passing static analysis is not a substitute for those tests.
+GitHub Actions runs the same static-check setup and command on pushes and PRs;
+the workflow itself must execute remotely before its result can be claimed.
+
+For matching editor diagnostics, attach VS Code to `ros-noetic`, select
+`ROS1/build/typecheck-venv/bin/python` with **Python: Select Interpreter**, and
+restart the language server. Shared source/library paths live in
+`pyrightconfig.json`; remove conflicting local `python.analysis.extraPaths`
+overrides. Pylance and Pyright versions may still produce different diagnostics.
+Fix diagnostics rather than suppressing rules; report any check that cannot run.
+
 Stop the demo before tests; launcher tests bind demo ports. In a sourced Noetic shell
 (enter `distrobox enter ros-noetic` first if needed), change to this checkout and run:
 
 ```bash
 source /opt/ros/noetic/setup.bash
 PYTHONPATH="$PWD/ROS1/package/python:$PWD/ROS1/tools:$PYTHONPATH" \
-  /usr/bin/python3 -m unittest discover -s ROS1/tests
+  /usr/bin/python3 -m unittest discover -s ROS1/tests -b
 ```
 
 Host Python skips ROS-dependent checks. For Unity changes, compile in the editor,
@@ -476,6 +531,13 @@ destination for one second, with no reported contacts. Contacts, 90 seconds with
 mission limit stop target publication and report failure. The shared controller
 also stops on stale targets, stale approval or contact telemetry. Resetting the
 physical trial starts a new run. Ctrl+C stops ROS; Unity holds its last position.
+The navigation node's `timeout`, `stall_timeout`, and `arrival_tolerance`
+parameters require positive, finite numbers; booleans and strings are rejected.
+The controller's `depth_maximum_observation_age` and `depth_goal_lookahead`
+also reject booleans and strings, preserving their positive-age and 0.5–5 m lookahead limits.
+Motion-controller numeric settings (`speed`, `update_rate`, `maximum_command_lead`,
+`position_timeout`, `target_timeout`, `speed_timeout`) likewise require numbers;
+their existing range and finite-value checks still apply.
 
 For a short diagnostic run, for example:
 
@@ -484,6 +546,7 @@ bash ROS1/scripts/run_navigation.sh 'destination:=[34.0,85.0,3.0]' speed:=0.3
 ```
 
 Use `reset_on_start:=false` only to continue from the current physical position.
+The node's `reset_on_start` parameter requires a boolean; strings and numbers are rejected.
 Do not run this alongside another mission/controller. Existing delivery commands
 retain their original behavior.
 

@@ -50,8 +50,10 @@ class DeliveryGuidance(PickupGuidance):
 
     DELIVERY_PHASES = ("CARRY_ASCEND", "CARRY", "LOWER", "WAIT_FOR_DROP", "SETTLE", "COMPLETE")
 
-    def __init__(self, pickup_settings=None, delivery_settings=None, access_settings=None):
+    def __init__(self, pickup_settings=None, delivery_settings=None, access_settings=None,
+                 stop_after_pickup: bool = False):
         super().__init__(pickup_settings)
+        self.stop_after_pickup = stop_after_pickup
         self.delivery = delivery_settings or DeliverySettings()
         self.carry_start = None
         self.access = access_settings
@@ -74,6 +76,8 @@ class DeliveryGuidance(PickupGuidance):
 
     def access_command(self, position, now):
         settings = self.access
+        if settings is None:
+            raise ValueError("Observation access requires access settings")
         if self.phase_started is None:
             self.phase_started = now
         if self.ascent_target is None:
@@ -114,6 +118,9 @@ class DeliveryGuidance(PickupGuidance):
             command = super().tick(position, now)
             if self.phase != "VERIFIED":
                 return command
+
+            if self.stop_after_pickup:
+                return self._hold_command(position)
 
             # Pickup has reached its lift target. Pause this tick, then ascend
             # vertically to carry height before allowing lateral travel.
